@@ -1,1 +1,7 @@
-opencv-python
+opencv-python==4.10.0.84
+fastapi==0.121.3
+uvicorn==0.38.0
+pydantic==2.12.4
+requests==2.32.3
+pillow==11.0.0
+python-multipart==0.0.20

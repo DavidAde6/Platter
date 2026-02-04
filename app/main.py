@@ -24,20 +24,15 @@ NUTRIENT_ID = [1008, 1005, 1003, 1079, 2000, 1004, 1257, 1258, 1292, 1293]
 NUTRIENT_NAME = ['Energy', 'Carbohydrate', 'Protein', 'Fiber', 'Sugars', 'Total Fat', 'Trans Fat', 'Saturated fats', 'Monosaturated fats', 'Polysaturated fats']
 NUTRIENT_MAP = dict(zip(NUTRIENT_ID, NUTRIENT_NAME))
 
-model = YOLO("yolov8n-cls.pt")
-
+model = YOLO("last.pt")
 
 # ---------------------FUNCTIONS--------------------------------------------
-
-# This function takes an image and returns the name
-
 
 
 
 
 
 # ---------------------POST REQUESTS----------------------------------------
-
 
 # Getting image------------------------------------------------------------
 @app.post("/upload/")
@@ -55,21 +50,19 @@ async def upload_img(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid image file")
 
     # Uses AI on Image
-    result = classifier(image)
+    result = model.predict(image)
+    r = result[0]
 
-    return {"imgName": result} 
+    # stores values
+    top_idx = int(r.probs.top1)
+    top_conf = float(r.probs.top1conf)
+    class_name = r.names[top_idx] # the name u need
 
-
-# Searching USDA------------------------------------------------
-class FoodQuery(BaseModel):
-    name: str
-
-@app.post("/usda/search")
-async def search_usda(query: FoodQuery):
+    #USDA QUERY USING NAME!
     url = "https://api.nal.usda.gov/fdc/v1/foods/search"
     params = {
         "api_key": API_KEY,
-        "query": query.name,
+        "query": class_name,
         "pageSize": 15
     }
 
@@ -101,5 +94,4 @@ async def search_usda(query: FoodQuery):
         "Serving": f"{food.get('servingSize', 100)}g",
         "macros": macros
     }
-
 

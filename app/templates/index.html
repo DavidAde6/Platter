@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Platter</title>
+  </head>
+  <body>
+    <h1>Welcome to Platter v0.1.0!</h1>
+    <p>Platter aims to make personal dieting easier and more accessible.</p>
+    <p>
+      All current working foods!: apple_pie, cheesecake, chicken_wings,
+      chocolate_cake, donuts, dumplings, french_fries, french_toast, fried_rice,
+      greek_salad, grilled_salmon, hamburger, hot_dog, lasagna,
+      macaroni_and_cheese, pancakes, pizza, poutine, samosa, steak, sushi,
+      waffles
+    </p>
+    <br />
+    <form method="post" enctype="multipart/form-data">
+      <label for="file">Upload Image here:</label>
+      <input type="file" id="file" name="file" accept="image/*" />
+      <!--must be called file-->
+      <button type="submit">Upload</button>
+    </form>
+    <br /><br />
+    {% if rows %}
+    <h2>Added "{{ query }}"</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>FDC ID</th>
+          <th>Name</th>
+          <th>Protein (g)</th>
+          <th>Total Fat (g)</th>
+          <th>Carbohydrate (g)</th>
+          <th>Energy (kcal)</th>
+          <th>Sugars (g)</th>
+          <th>Fiber (g)</th>
+          <th>Trans Fat (g)</th>
+          <th>Saturated fats (g)</th>
+          <th>Monosaturated fats (g)</th>
+          <th>Polysaturated fats (g)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.fdcId }}</td>
+          <td>{{ row.Food }}</td>
+          <td>{{ row.macros.get("Protein", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Total Fat", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Carbohydrate", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Energy", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Sugars", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Fiber", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Trans Fat", {}).get("value", "-") }}</td>
+          <td>{{ row.macros.get("Saturated fats", {}).get("value", "-") }}</td>
+          <td>
+            {{ row.macros.get("Monosaturated fats", {}).get("value", "-") }}
+          </td>
+          <td>
+            {{ row.macros.get("Polysaturated fats", {}).get("value", "-") }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </body>
+</html>

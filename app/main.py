@@ -25,9 +25,9 @@ app = FastAPI()
 NUTRIENT_ID = [1008, 1005, 1003, 1079, 2000, 1004, 1257, 1258, 1292, 1293]
 NUTRIENT_NAME = ['Energy', 'Carbohydrate', 'Protein', 'Fiber', 'Sugars', 'Total Fat', 'Trans Fat', 'Saturated fats', 'Monosaturated fats', 'Polysaturated fats']
 NUTRIENT_MAP = dict(zip(NUTRIENT_ID, NUTRIENT_NAME))
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="app/templates")
 
-model = YOLO("last.pt")
+model = YOLO("app/last.pt")
 rows = []
 
 # ---------------------FUNCTIONS--------------------------------------------

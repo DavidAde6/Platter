@@ -41,7 +41,7 @@ async def show_form(request: Request):
     return templates.TemplateResponse(
         "index.html",
         {"request": request, "rows": None}
-    )
+    ) 
 
 # ---------------------POST REQUESTS----------------------------------------
 
@@ -53,7 +53,7 @@ async def show_form(request: Request):
 #         {"request": request, "rows": rows, "query": name}
 #     )
 
-# Getting image------------------------------------------------------------
+# User posts image------------------------------------------------------------
 @app.post("/", response_class=HTMLResponse)
 async def upload_img(request: Request,file: UploadFile = File(...)):
 

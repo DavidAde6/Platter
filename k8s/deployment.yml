@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platter-deployment
+  labels:
+    app: platter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: platter
+  template:
+    metadata:
+      labels:
+        app: platter
+    spec:
+      containers:
+        - name: platter
+          image: 194133065055.dkr.ecr.us-east-1.amazonaws.com/platter:0.1.0
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

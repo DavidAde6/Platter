@@ -26,3 +26,6 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          envFrom:
+            - secretRef:
+                name: platter-secrets

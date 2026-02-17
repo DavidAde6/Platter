@@ -47,7 +47,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           # Update image in deployment manifest on the fly
-          sed -i "s#image: .*\$#image: $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG#g" k8s/deployment.yaml
-          kubectl apply -f k8s/deployment.yaml
-          kubectl apply -f k8s/service.yaml
-          kubectl apply -f k8s/ingress.yaml
+          sed -i "s#image: .*\$#image: $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG#g" k8s/deployment.yml
+          kubectl apply -f k8s/deployment.yml
+          kubectl apply -f k8s/service.yml
+          kubectl apply -f k8s/ingress.yml

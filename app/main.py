@@ -43,6 +43,10 @@ async def show_form(request: Request):
         {"request": request, "rows": None}
     ) 
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
 # ---------------------POST REQUESTS----------------------------------------
 
 # @app.post("/", response_class=HTMLResponse)

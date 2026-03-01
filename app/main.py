@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import os
 import requests
 from ultralytics import YOLO
+from pathlib import Path
 
 
 # TO RUN SERVER type - uvicorn main:app --reload
@@ -25,9 +26,12 @@ app = FastAPI()
 NUTRIENT_ID = [1008, 1005, 1003, 1079, 2000, 1004, 1257, 1258, 1292, 1293]
 NUTRIENT_NAME = ['Energy', 'Carbohydrate', 'Protein', 'Fiber', 'Sugars', 'Total Fat', 'Trans Fat', 'Saturated fats', 'Monosaturated fats', 'Polysaturated fats']
 NUTRIENT_MAP = dict(zip(NUTRIENT_ID, NUTRIENT_NAME))
-templates = Jinja2Templates(directory="app/templates")
 
-model = YOLO("app/last.pt")
+# Handles pathing for different environments (local vs docker)
+BASE_DIR = Path(__file__).resolve().parent
+
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
+model = YOLO(BASE_DIR / "last.pt")
 rows = []
 
 # ---------------------FUNCTIONS--------------------------------------------

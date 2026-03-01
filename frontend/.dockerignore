@@ -1,0 +1,8 @@
+#frontend
+node_modules
+dist
+dist-ssr
+
+# Environment files
+*.local
+.env

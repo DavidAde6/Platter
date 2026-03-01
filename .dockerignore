@@ -1,9 +1,0 @@
-.env
-app/ .env*
-app/ .env
-
-.git
-.gitignore
-.github
-
-__pycache__/

@@ -1,6 +1,7 @@
 
 #IMPORTS
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import requests
@@ -23,6 +24,16 @@ load_dotenv()
 API_KEY = os.environ["USDA_API_KEY"] # getting usda key for access
 #classifier = pipeline("image-classification", model="nateraw/food")
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 NUTRIENT_ID = [1008, 1005, 1003, 1079, 2000, 1004, 1257, 1258, 1292, 1293]
 NUTRIENT_NAME = ['Energy', 'Carbohydrate', 'Protein', 'Fiber', 'Sugars', 'Total Fat', 'Trans Fat', 'Saturated fats', 'Monosaturated fats', 'Polysaturated fats']
 NUTRIENT_MAP = dict(zip(NUTRIENT_ID, NUTRIENT_NAME))
@@ -62,13 +73,13 @@ async def health():
 #     )
 
 # User posts image------------------------------------------------------------
-@app.post("/", response_class=HTMLResponse)
-async def upload_img(request: Request,file: UploadFile = File(...)):
+@app.post("/api/upload")
+async def upload_img(image: UploadFile = File(...)):
 
-    if not file.content_type.startswith("image/"): # if not an image
+    if not image.content_type.startswith("image/"): # if not an image
         raise HTTPException(status_code=400, detail="File is not an Image") # temporary stop
 
-    content = await file.read()
+    content = await image.read()
 
     # Turn bytes into a Pillow Image
     try:
@@ -123,8 +134,14 @@ async def upload_img(request: Request,file: UploadFile = File(...)):
     }
 
     rows.append(row)
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "rows": rows, "query": class_name}
-    )
+    # return templates.TemplateResponse(
+    #     "index.html",
+    #     {"request": request, "rows": rows, "query": class_name}
+    # )
 
+    return {
+    "query": class_name,
+    "food": chosen_food["description"],
+    "serving": chosen_food.get("servingSize", 100),
+    "macros": macros
+}

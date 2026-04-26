@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platter-frontend-deployment
+  labels:
+    app: platter-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platter-frontend
+  template:
+    metadata:
+      labels:
+        app: platter-frontend
+    spec:
+      containers:
+        - name: platter-frontend
+          image: 194133065055.dkr.ecr.us-east-1.amazonaws.com/platter-frontend:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          envFrom:
+            - secretRef:
+                name: platter-secrets

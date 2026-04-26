@@ -5,9 +5,10 @@ metadata:
   name: platter-cluster
   region: us-east-1
 
-nodeGroups:
+managedNodeGroups:
   - name: ng-1
     instanceType: t3.small
     minSize: 1
     maxSize: 2
     desiredCapacity: 1
+    privateNetworking: true

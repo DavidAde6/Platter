@@ -18,6 +18,17 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: platter-service
+                name: platter-frontend-service
+                port:
+                  number: 80
+
+    - host: api.useplatter.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platter-backend-service
                 port:
                   number: 8000

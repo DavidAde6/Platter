@@ -8,7 +8,8 @@ on:
 env:
   AWS_REGION: us-east-1
   CLUSTER_NAME: platter-cluster
-  ECR_REPO: platter
+  ECR_REPO_BACKEND: platter-backend
+  ECR_REPO_FRONTEND: platter-frontend
 
 jobs:
   build-and-deploy:
@@ -34,8 +35,10 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG ./app
+          docker push $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG ./frontend
+          docker push $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG
 
       - name: Update kubeconfig
         run: |
@@ -46,8 +49,14 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Update image in deployment manifest on the fly
-          sed -i "s#image: .*\$#image: $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG#g" k8s/deployment.yml
-          kubectl apply -f k8s/deployment.yml
-          kubectl apply -f k8s/service.yml
+          kubectl apply -f k8s/backend-deployment.yml
+          kubectl apply -f k8s/backend-service.yml
+          kubectl apply -f k8s/frontend-deployment.yml
+          kubectl apply -f k8s/frontend-service.yml
           kubectl apply -f k8s/ingress.yml
+          kubectl set image deployment/platter-backend-deployment platter-backend=$ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG
+
+          kubectl set image deployment/platter-frontend-deployment platter-frontend=$ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG
+
+          kubectl rollout status deployment/platter-backend-deployment
+          kubectl rollout status deployment/platter-frontend-deployment

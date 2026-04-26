@@ -10,6 +10,7 @@ env:
   CLUSTER_NAME: platter-cluster
   ECR_REPO_BACKEND: platter-backend
   ECR_REPO_FRONTEND: platter-frontend
+  FRONTEND_API_URL: https://api.useplatter.ca
 
 jobs:
   build-and-deploy:
@@ -37,7 +38,7 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG ./app
           docker push $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG
-          docker build -t $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG ./frontend
+          docker build --build-arg VITE_API_URL=$FRONTEND_API_URL -t $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG ./frontend
           docker push $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG
 
       - name: Update kubeconfig

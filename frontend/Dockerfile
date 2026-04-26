@@ -6,9 +6,14 @@ WORKDIR /app
 # Copy package.json and lock file first (cached layer)
 COPY package.json package-lock.json ./
 
-RUN npm install
+RUN npm ci
 
 COPY . .
+
+# Inject API URL at build time for Vite
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+
 
 # Build React for production
 RUN npm run build

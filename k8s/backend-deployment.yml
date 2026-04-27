@@ -5,7 +5,7 @@ metadata:
   labels:
     app: platter-backend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: platter-backend

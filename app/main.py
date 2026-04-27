@@ -3,7 +3,6 @@
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 import requests
 from PIL import Image # IMAGE HANDLING
 import io
@@ -29,6 +28,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://useplatter.ca",
+        "https://www.useplatter.ca",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -41,7 +42,6 @@ NUTRIENT_MAP = dict(zip(NUTRIENT_ID, NUTRIENT_NAME))
 # Handles pathing for different environments (local vs docker)
 BASE_DIR = Path(__file__).resolve().parent
 
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
 model = YOLO(BASE_DIR / "last.pt")
 rows = []
 
@@ -51,26 +51,16 @@ rows = []
 
 
 #---------------------GET REQUESTS---------------------------------------
-@app.get("/", response_class=HTMLResponse)
-async def show_form(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "rows": None}
-    ) 
+
+@app.get("/")
+async def root():
+    return {"message": "Platter backend is running"}
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
 # ---------------------POST REQUESTS----------------------------------------
-
-# @app.post("/", response_class=HTMLResponse)
-# async def handle_form(request: Request, name: str = Form(...)):
-#     rows = search_usda(name)
-#     return templates.TemplateResponse(
-#         "index.html",
-#         {"request": request, "rows": rows, "query": name}
-#     )
 
 # User posts image------------------------------------------------------------
 @app.post("/api/upload")
@@ -134,10 +124,6 @@ async def upload_img(image: UploadFile = File(...)):
     }
 
     rows.append(row)
-    # return templates.TemplateResponse(
-    #     "index.html",
-    #     {"request": request, "rows": rows, "query": class_name}
-    # )
 
     return {
     "query": class_name,

@@ -95,8 +95,20 @@ async def upload_img(image: UploadFile = File(...)):
     }
 
     # gets json data
-    r = requests.get(url, params=params).json()
-    foods = r["foods"]
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    print("USDA STATUS:", response.status_code)
+    print("USDA RESPONSE:", data)
+
+    foods = data.get("foods", [])
+
+    if not foods:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No USDA foods found for query: {class_name}"
+        )
+
     chosen_food = foods[0]
     # returns one with
     for food in foods:

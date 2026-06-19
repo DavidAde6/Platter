@@ -1,33 +1,48 @@
-
-#IMPORTS
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-import requests
-from PIL import Image # IMAGE HANDLING
-import io
 from dotenv import load_dotenv
-import os
-import requests
-from ultralytics import YOLO
 from pathlib import Path
 
+from auth import create_access_token, get_current_user_id
+from image_metadata import extract_image_metadata
+from meals import (
+    MealPublic,
+    MealUploadResponse,
+    create_meal_with_metadata,
+    get_meal_image_key,
+    list_meals_for_user,
+)
+from storage import fetch_meal_image
+from users import (
+    AuthResponse,
+    LoginRequest,
+    SignupRequest,
+    UpdateUserRequest,
+    UserPublic,
+    authenticate_user,
+    create_user,
+    get_user_by_id,
+    update_user,
+)
 
-# TO RUN SERVER type - uvicorn main:app --reload
+BASE_DIR = Path(__file__).resolve().parent
+
+# TO RUN SERVER (from the app/ directory):
+#   cd app
+#   uvicorn main:app --reload
 # go to http://127.0.0.1:8000/docs
+# cd frontend
+# npm run dev
 
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
-#VARIABLES-----------------------------------------------------------------
-
-API_KEY = os.environ["USDA_API_KEY"] # getting usda key for access
-#classifier = pipeline("image-classification", model="nateraw/food")
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:8080",
         "https://useplatter.ca",
         "https://www.useplatter.ca",
     ],
@@ -35,111 +50,133 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-NUTRIENT_ID = [1008, 1005, 1003, 1079, 2000, 1004, 1257, 1258, 1292, 1293]
-NUTRIENT_NAME = ['Energy', 'Carbohydrate', 'Protein', 'Fiber', 'Sugars', 'Total Fat', 'Trans Fat', 'Saturated fats', 'Monosaturated fats', 'Polysaturated fats']
-NUTRIENT_MAP = dict(zip(NUTRIENT_ID, NUTRIENT_NAME))
 
-# Handles pathing for different environments (local vs docker)
-BASE_DIR = Path(__file__).resolve().parent
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
 
-model = YOLO(BASE_DIR / "last.pt")
-rows = []
+MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
 
-# ---------------------FUNCTIONS--------------------------------------------
-
-
-
-
-#---------------------GET REQUESTS---------------------------------------
 
 @app.get("/")
 async def root():
     return {"message": "Platter backend is running"}
 
+
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
-# ---------------------POST REQUESTS----------------------------------------
 
-# User posts image------------------------------------------------------------
-@app.post("/api/upload")
-async def upload_img(image: UploadFile = File(...)):
+@app.post("/api/auth/signup", response_model=AuthResponse)
+async def signup(body: SignupRequest):
+    try:
+        user = create_user(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    if not image.content_type.startswith("image/"): # if not an image
-        raise HTTPException(status_code=400, detail="File is not an Image") # temporary stop
+    token = create_access_token(user.user_id)
+    return AuthResponse(access_token=token, user=user)
 
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(body: LoginRequest):
+    user = authenticate_user(body)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_access_token(user.user_id)
+    return AuthResponse(access_token=token, user=user)
+
+
+@app.get("/api/users/me", response_model=UserPublic)
+async def get_me(user_id: int = Depends(get_current_user_id)):
+    user = get_user_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@app.patch("/api/users/me", response_model=UserPublic)
+async def patch_me(
+    body: UpdateUserRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    user = update_user(user_id, body)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@app.get("/api/meals", response_model=list[MealPublic])
+async def get_meals(user_id: int = Depends(get_current_user_id)):
+    return list_meals_for_user(user_id)
+
+
+@app.get("/api/meals/{meal_id}/image")
+def get_meal_image(
+    meal_id: int,
+    variant: str = "thumbnail",
+    user_id: int = Depends(get_current_user_id),
+):
+    if variant not in ("original", "thumbnail"):
+        raise HTTPException(status_code=400, detail="Invalid image variant")
+
+    object_key = get_meal_image_key(user_id, meal_id, variant)
+    if not object_key:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    try:
+        content, content_type = fetch_meal_image(object_key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        # private: only this authenticated user; never store in shared caches.
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.post("/api/upload", response_model=MealUploadResponse)
+async def upload_img(
+    image: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+):
     content = await image.read()
 
-    # Turn bytes into a Pillow Image
-    try:
-        image = Image.open(io.BytesIO(content)).convert("RGB")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid image file")
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
 
-    # Uses AI on Image
-    result = model.predict(image)
-    r = result[0]
-
-    # stores values
-    top_idx = int(r.probs.top1)
-    top_conf = float(r.probs.top1conf)
-    class_name = r.names[top_idx].replace("_", " ") # the name u need
-
-    #USDA QUERY USING NAME!
-    url = "https://api.nal.usda.gov/fdc/v1/foods/search"
-    params = {
-        "api_key": API_KEY,
-        "query": class_name,
-        "pageSize": 15
-    }
-
-    # gets json data
-    response = requests.get(url, params=params)
-    data = response.json()
-
-    print("USDA STATUS:", response.status_code)
-    print("USDA RESPONSE:", data)
-
-    foods = data.get("foods", [])
-
-    if not foods:
+    if image.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
-            status_code=404,
-            detail=f"No USDA foods found for query: {class_name}"
+            status_code=400,
+            detail=f"Unsupported file type: {image.content_type}",
         )
 
-    chosen_food = foods[0]
-    # returns one with
-    for food in foods:
-        ids = {n["nutrientId"] for n in food.get("foodNutrients", []) if n.get("amount") is not None}
-        if all(nid in ids for nid in NUTRIENT_ID):  # Has ALL needed
-            chosen_food = food
-            break
-    
-    macros = {}
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="File too large")
 
-    #gets nutrient info
-    for i, n in enumerate(chosen_food.get("foodNutrients", [])):
-        if n["nutrientId"] in NUTRIENT_ID:
-            name = NUTRIENT_MAP[n["nutrientId"]]
-            macros[name] = {
-                "value": n["value"],
-                "unit": n.get("unitName", "")
-            }
-    
-    row = {
-        "Food": chosen_food["description"],
-        "fdcId": chosen_food["fdcId"],
-        "Serving": f"{chosen_food.get('servingSize', 100)}g",
-        "macros": macros
-    }
+    try:
+        metadata = extract_image_metadata(content, image)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    rows.append(row)
-
-    return {
-    "query": class_name,
-    "food": chosen_food["description"],
-    "serving": chosen_food.get("servingSize", 100),
-    "macros": macros
-}
+    try:
+        return create_meal_with_metadata(
+            user_id,
+            "web_upload",
+            metadata,
+            content,
+            image.content_type or "application/octet-stream",
+            image.filename,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to store meal upload") from exc

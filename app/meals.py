@@ -3,9 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from db import get_connection
+from graph import run_image_quality_graph
+from image_quality import analyze_image_quality
+from quality_decision import evaluate_quality
 from storage import is_r2_configured, resolve_meal_urls, upload_meal_images
 
 
@@ -28,6 +32,8 @@ class MealUploadResponse(BaseModel):
     image_url: str | None = None
     thumbnail_url: str | None = None
     metadata: dict[str, Any]
+    # User-facing reason when the photo is rejected (status == "rejected").
+    message: str | None = None
 
 
 def _parse_exif_datetime(value: Any) -> datetime | None:
@@ -57,6 +63,36 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _infer_likely_meal_type(captured_at: datetime | None) -> str:
+    """Infer the meal type from the photo's local capture hour.
+
+    EXIF DateTimeOriginal has no timezone, so its wall-clock hour already
+    reflects local time where the photo was taken -- ideal for this. Without a
+    capture time there's nothing to infer from, so we fall back to 'unknown'.
+    """
+    if captured_at is None:
+        return "unknown"
+
+    hour = captured_at.hour
+    if 5 <= hour < 11:
+        return "breakfast"
+    if 11 <= hour < 16:
+        return "lunch"
+    if 16 <= hour < 22:
+        return "dinner"
+    return "unknown"
+
+
+def _context_row_values(meal_id: int, metadata: dict[str, Any]) -> tuple[Any, ...]:
+    captured_at = _parse_exif_datetime(
+        metadata.get("datetime_original") or metadata.get("datetime")
+    )
+    likely_meal_type = _infer_likely_meal_type(captured_at)
+    # city/country require reverse-geocoding the EXIF GPS coordinates; left
+    # NULL for now until a geocoding source is wired in.
+    return (meal_id, likely_meal_type, None, None)
 
 
 def _metadata_row_values(meal_id: int, metadata: dict[str, Any]) -> tuple[Any, ...]:
@@ -118,17 +154,30 @@ def create_meal_with_metadata(
                 content_type,
                 filename,
             )
+            # detected_issues combines the deterministic OpenCV checks
+            # (`technical`) with the LangGraph vision node's analysis (`vision`).
+            detected_issues = {
+                "technical": analyze_image_quality(content),
+                "vision": run_image_quality_graph(content),
+            }
+            # Gate the meal on is_food_image, the vision recommended_action, and
+            # the technical checks. The image is stored either way (per spec);
+            # rejected meals carry a user-facing rejection_reason.
+            decision = evaluate_quality(detected_issues)
+            status = "completed" if decision.accepted else "rejected"
+
             cur.execute(
                 """
                 UPDATE meal_uploads
                 SET image_url = %s,
                     thumbnail_url = %s,
-                    status = 'completed',
+                    status = %s,
+                    rejection_reason = %s,
                     processed_at = NOW()
                 WHERE meal_id = %s
                 RETURNING status
                 """,
-                (image_key, thumbnail_key, meal_id),
+                (image_key, thumbnail_key, status, decision.message, meal_id),
             )
             row = cur.fetchone()
 
@@ -141,6 +190,32 @@ def create_meal_with_metadata(
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 _metadata_row_values(meal_id, metadata),
+            )
+
+            cur.execute(
+                """
+                INSERT INTO meal_contexts (
+                    meal_id, likely_meal_type, city, country
+                ) VALUES (%s, %s, %s, %s)
+                """,
+                _context_row_values(meal_id, metadata),
+            )
+
+            cur.execute(
+                """
+                INSERT INTO image_qualities (
+                    meal_id, is_food_image, food_confidence,
+                    detected_issues, recommended_action, usability_status
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    meal_id,
+                    decision.is_food_image,
+                    decision.food_confidence,
+                    Jsonb(detected_issues),
+                    decision.recommended_action,
+                    decision.usability_status,
+                ),
             )
             conn.commit()
 
@@ -158,6 +233,7 @@ def create_meal_with_metadata(
         image_url=resolved["image_url"],
         thumbnail_url=resolved["thumbnail_url"],
         metadata=metadata,
+        message=decision.message,
     )
 
 

@@ -12,6 +12,8 @@ safetensors==0.7.0
 torch==2.9.1
 ultralytics==8.3.32
 python-dotenv==1.2.1
+langgraph==1.2.6
+anthropic==0.111.0
 psycopg[binary]==3.2.9
 bcrypt==4.3.0
 PyJWT==2.10.1

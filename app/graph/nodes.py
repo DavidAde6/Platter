@@ -13,6 +13,11 @@ from graph.state import ImageQualityState
 # outputs (output_config.format), so the node gets schema-valid JSON back.
 MODEL = "claude-opus-4-8"
 
+# Bump on any change to SYSTEM_PROMPT or DETECTED_ISSUES_SCHEMA. Persisted
+# with every artifact this node produces, so a stored payload can be traced
+# to the prompt that produced it and stale ones can be found and re-run.
+PROMPT_VERSION = "quality/2026-09-12.1"
+
 
 @lru_cache(maxsize=1)
 def _client() -> anthropic.Anthropic:

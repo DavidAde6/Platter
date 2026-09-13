@@ -25,6 +25,8 @@ export interface MealUploadResponse {
   image_url?: string | null;
   thumbnail_url?: string | null;
   metadata: MealUploadMetadata;
+  message?: string | null;
+  nutrition_ready: boolean;
 }
 
 export interface MealLogItem {
@@ -43,14 +45,16 @@ export interface MealApiItem {
   meal_id: number;
   image_url: string | null;
   thumbnail_url: string | null;
-  source: string;
   status: string;
   created_at: string;
-  processed_at: string | null;
-  rejection_reason: string | null;
   image_format: string | null;
-  image_type: string | null;
+  // Branch nutrition/calorie display on this, never on `status`: a meal can
+  // be stored and accepted while still not being eligible for an estimate.
+  nutrition_ready: boolean;
 }
+// source, processed_at, rejection_reason, image_type dropped: typed here
+// before but never read by any component. Re-add the one you need if a
+// future screen (e.g. a real rejection message) starts reading it.
 
 function authHeaders(): HeadersInit {
   const token = getStoredToken();

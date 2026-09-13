@@ -22,6 +22,11 @@ except ImportError:
 # quality assessment doesn't need more, and downscaling caps image-token cost.
 MAX_EDGE = 1568
 
+# Which assembly of stages the graph currently represents. Recorded on
+# analysis_runs so runs from different graph shapes stay comparable.
+# Bump when a node or edge is added, removed or reordered.
+PIPELINE_VERSION = "m0-quality-only"
+
 
 @lru_cache(maxsize=1)
 def build_image_quality_graph():

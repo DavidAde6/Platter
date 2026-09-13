@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 from typing import Any
 
 import cv2
@@ -36,6 +38,42 @@ UNDEREXPOSURE_PCT_MAX = 50.0
 
 # Shortest side (px) below this is too low-resolution to analyze reliably.
 RESOLUTION_MIN_SIDE = 200
+
+# Bump when a threshold changes or a check is added/removed.
+ANALYZER_VERSION = "opencv/1"
+
+
+def analyzer_thresholds() -> dict[str, float | int]:
+    """The threshold set behind a stored payload.
+
+    Persisted alongside each result because otherwise a stored payload cannot
+    be re-interpreted after a tuning change: you can see that `blur.issue` was
+    true, but not what bar the photo failed to clear, so old and new results
+    are silently incomparable.
+    """
+    return {
+        "blur_laplacian_min": BLUR_LAPLACIAN_MIN,
+        "brightness_dark_max": BRIGHTNESS_DARK_MAX,
+        "brightness_bright_min": BRIGHTNESS_BRIGHT_MIN,
+        "near_white_level": NEAR_WHITE_LEVEL,
+        "near_black_level": NEAR_BLACK_LEVEL,
+        "overexposure_pct_max": OVEREXPOSURE_PCT_MAX,
+        "underexposure_pct_max": UNDEREXPOSURE_PCT_MAX,
+        "resolution_min_side": RESOLUTION_MIN_SIDE,
+    }
+
+
+def analyzer_config_hash() -> str:
+    """Short stable digest of (version, thresholds), for analysis_artifacts.
+
+    Lets "every technical artifact produced under the old thresholds" be a
+    query rather than a guess based on timestamps.
+    """
+    payload = json.dumps(
+        {"version": ANALYZER_VERSION, "thresholds": analyzer_thresholds()},
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def _grayscale_array(content: bytes) -> tuple[np.ndarray, int, int]:
@@ -103,4 +141,9 @@ def analyze_image_quality(content: bytes) -> dict[str, Any]:
     }
 
     checks["has_issues"] = any(c["issue"] for c in checks.values())
+
+    # Added AFTER has_issues on purpose: the comprehension above iterates
+    # checks.values() and expects every value to be a check dict.
+    checks["analyzer_version"] = ANALYZER_VERSION
+    checks["thresholds"] = analyzer_thresholds()
     return checks

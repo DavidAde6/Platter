@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pathlib import Path
@@ -6,10 +6,12 @@ from pathlib import Path
 from auth import create_access_token, get_current_user_id
 from image_metadata import extract_image_metadata
 from meals import (
+    MealDetail,
     MealPublic,
     MealUploadResponse,
     create_meal_with_metadata,
-    get_meal_image_key,
+    get_meal_for_user,
+    get_meal_image_ref,
     list_meals_for_user,
 )
 from storage import fetch_meal_image
@@ -113,8 +115,26 @@ async def patch_me(
 
 
 @app.get("/api/meals", response_model=list[MealPublic])
-async def get_meals(user_id: int = Depends(get_current_user_id)):
-    return list_meals_for_user(user_id)
+async def get_meals(
+    limit: int = Query(default=100, ge=1, le=200),
+    user_id: int = Depends(get_current_user_id),
+):
+    return list_meals_for_user(user_id, limit=limit)
+
+
+@app.get("/api/meals/{meal_id}", response_model=MealDetail)
+async def get_meal(meal_id: int, user_id: int = Depends(get_current_user_id)):
+    """One meal with its gate verdict and identified foods.
+
+    Everything a calorie or macro display needs is here, including
+    `nutrition_ready` -- which is the flag to branch on, not `status`.
+    """
+    meal = get_meal_for_user(user_id, meal_id)
+    if meal is None:
+        # Also the response for a meal owned by someone else: a caller must
+        # not be able to distinguish "not yours" from "does not exist".
+        raise HTTPException(status_code=404, detail="Meal not found")
+    return meal
 
 
 @app.get("/api/meals/{meal_id}/image")
@@ -123,21 +143,25 @@ def get_meal_image(
     variant: str = "thumbnail",
     user_id: int = Depends(get_current_user_id),
 ):
+    # Kept as input validation so a typo is a 400 rather than a 404. The
+    # value itself is now a bound query parameter against meal_images.role,
+    # not a lookup into a map of column names.
     if variant not in ("original", "thumbnail"):
         raise HTTPException(status_code=400, detail="Invalid image variant")
 
-    object_key = get_meal_image_key(user_id, meal_id, variant)
-    if not object_key:
+    ref = get_meal_image_ref(user_id, meal_id, variant)
+    if ref is None:
         raise HTTPException(status_code=404, detail="Image not found")
 
     try:
-        content, content_type = fetch_meal_image(object_key)
+        content, fetched_content_type = fetch_meal_image(ref.object_key)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return Response(
         content=content,
-        media_type=content_type,
+        # Prefer what we recorded at upload time over whatever R2 echoes back.
+        media_type=ref.content_type or fetched_content_type,
         # private: only this authenticated user; never store in shared caches.
         headers={"Cache-Control": "private, max-age=3600"},
     )

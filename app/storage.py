@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import os
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
 
 import boto3
 from botocore.client import BaseClient
@@ -20,6 +21,40 @@ CONTENT_TYPE_EXTENSIONS = {
 }
 
 THUMBNAIL_MAX_SIZE = 256
+
+
+@dataclass(frozen=True)
+class ImageAsset:
+    """A variant that is now in R2, described by what was actually stored.
+
+    Everything here is measured from the bytes rather than inferred later.
+    The object key in particular cannot be reconstructed from ids, because
+    the extension comes from the content type or, failing that, the client's
+    filename -- so it has to be carried, not recomputed.
+    """
+
+    role: str
+    object_key: str
+    content_type: str
+    byte_size: int
+    sha256: str
+    image_format: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True)
+class UploadedAssets:
+    """The result of one upload.
+
+    ``thumbnail`` is None when thumbnail generation failed. It is never the
+    original: the previous code aliased the two keys on failure, which made
+    the database claim a thumbnail existed and then serve a multi-megabyte
+    original to a list view.
+    """
+
+    original: ImageAsset
+    thumbnail: ImageAsset | None
 
 
 def is_r2_configured() -> bool:
@@ -74,7 +109,8 @@ def _upload_object(key: str, content: bytes, content_type: str) -> None:
         raise RuntimeError(f"R2 upload failed ({code}): {message}") from exc
 
 
-def _build_thumbnail(content: bytes) -> bytes:
+def _build_thumbnail(content: bytes) -> tuple[bytes, int, int]:
+    """Downscaled JPEG plus its real dimensions."""
     with Image.open(io.BytesIO(content)) as img:
         if getattr(img, "is_animated", False) and getattr(img, "n_frames", 1) > 1:
             img.seek(0)
@@ -83,7 +119,20 @@ def _build_thumbnail(content: bytes) -> bytes:
         img.thumbnail((THUMBNAIL_MAX_SIZE, THUMBNAIL_MAX_SIZE))
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=85, optimize=True)
-        return buffer.getvalue()
+        return buffer.getvalue(), img.width, img.height
+
+
+def _describe(content: bytes) -> tuple[str | None, int | None, int | None]:
+    """Pillow format and dimensions, or Nones if it will not decode.
+
+    Best-effort by design: a file we cannot decode can still be stored, and
+    the quality gate is what decides whether it was usable.
+    """
+    try:
+        with Image.open(io.BytesIO(content)) as img:
+            return img.format, img.width, img.height
+    except Exception:
+        return None, None, None
 
 
 def upload_meal_images(
@@ -92,23 +141,52 @@ def upload_meal_images(
     content: bytes,
     content_type: str,
     filename: str | None,
-) -> tuple[str, str]:
+) -> UploadedAssets:
+    """Put the original and a thumbnail in R2 and describe what was stored.
+
+    A thumbnail failure is not an upload failure -- the original is what
+    matters -- but it is reported as an absent variant rather than papered
+    over by pointing the thumbnail at the original.
+    """
     if not is_r2_configured():
         raise RuntimeError("Cloudflare R2 is not configured")
 
     extension = _extension(content_type, filename)
     original_key = _object_key(user_id, meal_id, "original", extension)
-    thumbnail_key = _object_key(user_id, meal_id, "thumbnail", "jpg")
 
     _upload_object(original_key, content, content_type)
 
-    try:
-        thumbnail_bytes = _build_thumbnail(content)
-        _upload_object(thumbnail_key, thumbnail_bytes, "image/jpeg")
-    except Exception:
-        thumbnail_key = original_key
+    image_format, width, height = _describe(content)
+    original = ImageAsset(
+        role="original",
+        object_key=original_key,
+        content_type=content_type,
+        byte_size=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        image_format=image_format,
+        width=width,
+        height=height,
+    )
 
-    return original_key, thumbnail_key
+    thumbnail: ImageAsset | None = None
+    try:
+        thumbnail_bytes, thumb_w, thumb_h = _build_thumbnail(content)
+        thumbnail_key = _object_key(user_id, meal_id, "thumbnail", "jpg")
+        _upload_object(thumbnail_key, thumbnail_bytes, "image/jpeg")
+        thumbnail = ImageAsset(
+            role="thumbnail",
+            object_key=thumbnail_key,
+            content_type="image/jpeg",
+            byte_size=len(thumbnail_bytes),
+            sha256=hashlib.sha256(thumbnail_bytes).hexdigest(),
+            image_format="JPEG",
+            width=thumb_w,
+            height=thumb_h,
+        )
+    except Exception:
+        thumbnail = None
+
+    return UploadedAssets(original=original, thumbnail=thumbnail)
 
 
 def fetch_meal_image(object_key: str) -> tuple[bytes, str]:
@@ -136,27 +214,25 @@ def fetch_meal_image(object_key: str) -> tuple[bytes, str]:
     return response["Body"].read(), content_type
 
 
-def _image_proxy_path(meal_id: int, variant: str) -> str:
-    return f"/api/meals/{meal_id}/image?variant={variant}"
+def _image_proxy_path(meal_id: int, role: str) -> str:
+    return f"/api/meals/{meal_id}/image?variant={role}"
 
 
-def resolve_meal_urls(meal: dict[str, Any]) -> dict[str, Any]:
-    """Replace stored R2 object keys with authenticated proxy paths.
+def meal_image_paths(
+    meal_id: int, *, has_original: bool, has_thumbnail: bool
+) -> tuple[str | None, str | None]:
+    """Authenticated proxy paths for a meal's variants, as (original, thumbnail).
 
-    The frontend never receives a public or presigned R2 URL; instead it
-    gets a path served by our own API, which enforces auth and ownership.
+    The client never receives an object key or a presigned R2 URL -- only a
+    path served by this API, which checks auth and ownership before streaming
+    bytes. The paths are derived from (meal_id, role), so nothing about the
+    storage layout leaks.
+
+    Takes explicit booleans rather than probing a row dict. The previous
+    version read ``meal.get("image_url")``, which meant a renamed or missing
+    projection column produced None for both paths -- images silently vanished
+    from the UI with no error raised anywhere.
     """
-    resolved = dict(meal)
-    meal_id = meal.get("meal_id")
-
-    resolved["image_url"] = (
-        _image_proxy_path(meal_id, "original")
-        if meal_id is not None and meal.get("image_url")
-        else None
-    )
-    resolved["thumbnail_url"] = (
-        _image_proxy_path(meal_id, "thumbnail")
-        if meal_id is not None and meal.get("thumbnail_url")
-        else None
-    )
-    return resolved
+    original = _image_proxy_path(meal_id, "original") if has_original else None
+    thumbnail = _image_proxy_path(meal_id, "thumbnail") if has_thumbnail else None
+    return original, thumbnail

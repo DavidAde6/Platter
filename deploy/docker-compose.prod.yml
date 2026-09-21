@@ -1,0 +1,84 @@
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE to an immutable GHCR image tag}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the host-only environment file}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in the host-only environment file}
+      USDA_API_KEY: ${USDA_API_KEY:?Set USDA_API_KEY in the host-only environment file}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in the host-only environment file}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?Set R2_ACCOUNT_ID in the host-only environment file}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?Set R2_ACCESS_KEY_ID in the host-only environment file}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY in the host-only environment file}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:?Set R2_BUCKET_NAME in the host-only environment file}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:?Set UVICORN_WORKERS from the upload benchmark}
+      DB_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-0}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:?Set DB_POOL_MAX_SIZE per Uvicorn worker}
+    command:
+      - /bin/sh
+      - -c
+      - exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers "$${UVICORN_WORKERS}"
+    expose:
+      - "8000"
+    networks:
+      - application
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    cpus: ${BACKEND_CPU_LIMIT:-2.0}
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE to an immutable GHCR image tag}
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - tunnel
+      - application
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    cpus: ${FRONTEND_CPU_LIMIT:-0.5}
+
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:?Set CLOUDFLARED_VERSION to a tested immutable version}
+    command: tunnel --no-autoupdate run --token $${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in the host-only environment file}
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - tunnel
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${CLOUDFLARED_MEMORY_LIMIT:-128m}
+    cpus: ${CLOUDFLARED_CPU_LIMIT:-0.25}
+
+networks:
+  tunnel:
+  application:

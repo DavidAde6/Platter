@@ -1,16 +1,15 @@
-name: Deploy Platter to EKS
+name: Build and deploy Platter
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
 
 env:
-  AWS_REGION: us-east-1
-  CLUSTER_NAME: platter-cluster
-  ECR_REPO_BACKEND: platter-backend
-  ECR_REPO_FRONTEND: platter-frontend
-  FRONTEND_API_URL: https://api.useplatter.ca
+  DEPLOY_PATH: /opt/platter
 
 jobs:
   build-and-deploy:
@@ -20,44 +19,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push Docker image to ECR
+      - name: Build and push immutable images
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG ./app
-          docker push $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG
-          docker build --build-arg VITE_API_URL=$FRONTEND_API_URL -t $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG ./frontend
-          docker push $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG
+          image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build -t "$image_prefix-backend:$IMAGE_TAG" ./app
+          docker push "$image_prefix-backend:$IMAGE_TAG"
+          docker build --build-arg VITE_API_URL= -t "$image_prefix-frontend:$IMAGE_TAG" ./frontend
+          docker push "$image_prefix-frontend:$IMAGE_TAG"
 
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
-
-      - name: Deploy to EKS
+      - name: Configure SSH
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy Compose stack on VM
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          kubectl apply -f k8s/backend-deployment.yml
-          kubectl apply -f k8s/backend-service.yml
-          kubectl apply -f k8s/frontend-deployment.yml
-          kubectl apply -f k8s/frontend-service.yml
-          kubectl apply -f k8s/ingress.yml
-          kubectl set image deployment/platter-backend-deployment platter-backend=$ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG
-
-          kubectl set image deployment/platter-frontend-deployment platter-frontend=$ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG
-
-          kubectl rollout status deployment/platter-backend-deployment
-          kubectl rollout status deployment/platter-frontend-deployment
+          image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' BACKEND_IMAGE='$image_prefix-backend:$IMAGE_TAG' FRONTEND_IMAGE='$image_prefix-frontend:$IMAGE_TAG' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml pull
+          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml run --rm backend python migrate.py
+          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml up -d --wait --remove-orphans
+          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml ps
+          REMOTE

@@ -226,13 +226,76 @@ Non-negotiable, because they're what makes the gate worth having:
 
 ## Risks to check before building
 
-**1. Gateway timeout — check this first.** `PLANS.txt:79-82` lists it as an async trigger and flags it unverified. `main.py:42-48` shows `useplatter.ca` in the CORS allowlist, so there is likely a Cloudflare proxy in front of the API, and Cloudflare's default limit is 100s. M1 adds a second Opus vision call and M2 adds USDA lookups to a request that already does upload, R2 writes, and one vision call. **Measure p95 upload latency against the real proxy before M2 ships.** If the ceiling is 30s or 60s rather than 100s, that overrides the sync decision and `BackgroundTasks` becomes the M2-era fallback.
+These are gates, not a backlog. Resolve the M1 gates before adding the second
+vision call; resolve the M2 gates before emitting a nutrient number; resolve
+the M4 gates before accepting real vibe traffic.
 
-**2. USDA coverage on the foods in our own examples.** FoodData Central is thin on jollof rice, egusi, plantain preparations — and those are the example foods throughout our docs. If matching fails or mismatches badly, nutrition looks broken precisely for the users we'd demo to. Mitigation: allow a VLM-estimated fallback with a deliberately wider range, and tag the source in the `nutrition` payload (`usda_match` vs `model_estimate`) so the split is measurable rather than invisible.
+**1. Production path and timeout — M1 gate.** The deployment manifests use an
+AWS Application Load Balancer (`k8s/ingress.yml`), not a Cloudflare proxy;
+Cloudflare R2 is object storage only. The manifest does not set an ALB idle
+timeout, whose AWS default is 60 seconds. Verify that the DNS records,
+certificate, ALB listener, and `api.useplatter.ca` health endpoint are live,
+then measure p50/p95 and timeout/error rate for authenticated uploads through
+that real path. Test one, two, and five concurrent uploads, not only one
+happy-path photo. M1 adds another model call to a request that already does
+R2 writes and one vision call. A p95 near the configured deadline, a timeout,
+or unacceptable concurrent-request behaviour overrides the sync decision.
 
-**3. Model cost per upload.** Two Opus vision calls per accepted meal. `PLANS.txt` Phase 4 suggests tiering the gate down to Sonnet or Haiku. Don't pull that forward blind — the gate is the best-validated component in the repo and it has 35 tests pinning its behavior. Measure cost first; if it bites, re-run the gate test suite against the cheaper model before switching.
+**2. One-pod synchronous capacity — M1 gate.** The production backend has one
+replica, the default single Uvicorn worker, and a 400m CPU limit
+(`k8s/backend-deployment.yml`; `app/Dockerfile`). The async FastAPI upload
+handler currently calls synchronous OpenCV, R2, and Anthropic code directly.
+Consequently a slow upload can delay unrelated requests. Benchmark the real
+pod under the concurrency test above and decide explicitly whether to add
+workers/replicas, move blocking work off the event loop, or make analysis
+durable and async. `BackgroundTasks` can shorten the client wait, but is not
+a durable queue and does not add capacity or survive a pod restart.
 
-**4. Baseline vs live schema drift.** `PLANS.txt:133-137` carries this open item: every statement in `0001_baseline.sql` is `IF NOT EXISTS`, so it will not correct a live Neon table that differs from the reconstruction. Run `pg_dump --schema-only` and diff before adding migrations `0003`+.
+**3. USDA coverage, limits, and failure mode — M2 gate.** FoodData Central is
+thin on jollof rice, egusi, and plantain preparations — the dishes in our own
+examples. Build and hand-review a representative match set before M2; define
+what counts as an acceptable match and a maximum useful range width. The
+client needs a persistent positive and negative cache, request timeout, 429
+handling, and a measurable source in the nutrition payload (`usda_match` vs
+`model_estimate`). FoodData Central's default limit is 1,000 requests per hour
+per IP, so per-food live lookups are not a viable steady state. A VLM fallback
+must be deliberately wider and visibly marked as an estimate, never presented
+as an equivalent USDA result.
+
+**4. Model cost and abuse controls — M1/M4 gate.** Two Opus calls per accepted
+meal, plus generated recipes, create a paid endpoint that a newly created
+account can repeatedly exercise. Before exposing M1, measure input and output
+tokens, latency, and cost for representative photos; set a per-user/IP upload
+limit, a cost alert/cap, and an operational error budget. Before M4, also limit
+vibe prompt length and request rate, validate the structured recipe response,
+and constrain the prompt so user text cannot override avoid-list or safety
+instructions. Only consider a cheaper quality model after the existing gate
+regression suite passes against it.
+
+**5. Avoid list is not allergen safety — M4 gate.** Free-text avoids must be
+normalized and checked against ingredients, substitutions, and uncertainty; a
+prompt-only instruction is not enough. Recipe UI and API copy must say that the
+result is not allergen-safe or medical advice, avoid affirmative medical
+claims, and make uncertain ingredients visible. Decide what happens when the
+model cannot confidently meet an avoid list: return no card or request a
+different prompt, rather than quietly suggesting a risky substitute.
+
+**6. Vibe-query privacy and retention — M4 gate.** `vibe_queries.prompt` is an
+intentionally permanent product-research record, but it can contain health,
+religion, pregnancy, eating-disorder, or household information. Choose a
+retention period, deletion/export behaviour, and who can access raw prompts
+before writing the table. Store the minimum data needed to learn from queries;
+do not let an analytics need silently become indefinite retention of sensitive
+text.
+
+**7. Schema baseline status — planning correction.** The old baseline-drift
+risk is resolved for the documented disposable development database:
+`0001_baseline.sql` is an intentional from-scratch baseline, not an
+`IF NOT EXISTS` reconstruction, and `PLANS.txt` records the re-baseline.
+`nutrition_ready` is already exposed by the meal read models. Do not create
+work to fix either premise. If a separate persistent production database
+exists, inventory it and run a schema-only diff before migrations `0003`+
+are applied; otherwise, treat new migrations as normal forward-only changes.
 
 ---
 
@@ -242,8 +305,8 @@ Measurement, not vibes — and the first two must gate their own milestones.
 
 | Question | Measure |
 |----------|---------|
-| Does food ID actually work? | Hand-label ~50 real meal photos (include non-Western dishes). Report per-item precision and recall before M2 starts. |
-| Are the ranges honest? | Range coverage: how often does a known true value fall inside the stated range? A range that's always right and always 400–1200 kcal is useless — track width alongside coverage. |
+| Does food ID actually work? | Freeze a hand-labeled evaluation set of ~50 real meal photos before prompt tuning (include non-Western dishes and non-food negatives). Report per-item precision, recall, and false positives by cuisine before M2 starts. Define the go/no-go threshold in advance. |
+| Are the ranges honest? | Range coverage: how often does a known true value fall inside the stated range? A range that's always right and always 400–1200 kcal is useless — track median/percentile width alongside coverage, split by USDA match and model fallback. |
 | Does anyone want the vibe box? | Vibes per active user per week; share of vibes where a card is opened. |
 | Does the loop close? | Share of opened recipes marked cooked. This is the single number that says the product works. |
 | Is the gate still good? | Keep the existing suite green; watch false rejections on real uploads. |

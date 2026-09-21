@@ -27,6 +27,8 @@ RUN rm -rf /usr/share/nginx/html/*
 # Copy built React files from previous stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
+# Production routing and proxying are supplied by deploy/nginx.conf at runtime.
+
 # Expose HTTP port
 EXPOSE 80
 

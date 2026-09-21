@@ -1,0 +1,299 @@
+PLATTER — BUILD PLAN
+====================
+
+Scope: provision everything the docs describe but the codebase lacks.
+Sources: docs/Guide.md (implemented today), docs/AnalysisPipeline.md (design).
+Written: 2026-08-03. Branch: dev.
+
+
+-----------------------------------------------------------------------
+CURRENT STATE
+-----------------------------------------------------------------------
+
+The quality gate is complete and works end to end:
+
+  OpenCV technical checks  (app/image_quality.py)
+    -> Claude vision node  (app/graph/nodes.py, claude-opus-4-8)
+    -> evaluate_quality()  (app/quality_decision.py)
+    -> persisted as technical_quality / vision_quality analysis artifacts
+       and a meal_gate_verdicts row
+
+The graph is still a single node (app/graph/builder.py:34-38):
+
+    START -> image_quality -> END
+
+Nothing downstream of "is this a usable photo?" exists. A user who uploads
+a perfect meal photo gets back status:"completed" and nothing else. The
+product's entire premise -- ingredient identification and nutrition
+estimation -- is unbuilt.
+
+
+-----------------------------------------------------------------------
+GAP FOUND DURING REVIEW (not listed in either doc)
+-----------------------------------------------------------------------
+
+Two of five tables have no DDL in the repo.
+
+  app/schema/ contains:  users.sql, meal_contexts.sql, image_qualities.sql
+  Missing:               meal_uploads.sql, image_metadata.sql
+
+Guide.md:302 admits this for meal_uploads ("No SQL file in repo; columns
+inferred from code") but does not flag image_metadata.
+
+Consequence: the database cannot be provisioned from scratch. This is
+literal provisioning, so it leads Phase 0 and reorders the doc's own
+implementation checklist.
+
+
+-----------------------------------------------------------------------
+DECISION: STAY SYNCHRONOUS FOR NOW
+-----------------------------------------------------------------------
+
+AnalysisPipeline.md recommends async (sync gate + queued analysis) as the
+production pattern. That is correct eventually. Not yet.
+
+Cost of async today:
+
+  - A broker and a worker. Celery/ARQ needs Redis plus a second container,
+    added while we are actively simplifying deployment (k8s removal).
+  - 'processing' becomes a durable state. Today it is transient -- inserted
+    at the top of the request, resolved before commit (meals.py:220). It
+    never survives a request. Async forces GET /api/meals, Log.tsx, and the
+    upload response to handle "not done yet", plus distinguish pending from
+    stuck.
+  - The transaction splits. create_meal_with_metadata() is one transaction,
+    one commit. Async becomes commit-gate-then-update-later: two
+    transactions needing idempotency and retry-safety.
+  - Debugging moves out of the request path into worker logs.
+
+Value of sync today: the prompts and schemas do not exist yet and will be
+iterated on constantly. Sync gives one loop -- upload, see the full result,
+see the traceback if it broke. That iteration speed outweighs 15s of
+latency while we are the only user. A user who just took a photo and asked
+for analysis tolerates a 20s wait with a progress indicator.
+
+SWITCH TO ASYNC WHEN ONE OF THESE FIRES:
+
+  1. Segmentation ships. A 3rd and 4th model call is where the budget blows.
+  2. p95 upload exceeds ~30s.
+  3. A gateway timeout is hit. CHECK THIS NOW -- Cloudflare defaults to
+     100s, many proxies to 30s or 60s. A hard 30s ceiling overrides
+     everything above and forces async early.
+  4. Mobile clients arrive. A dropped connection currently discards the
+     entire analysis.
+
+Intermediate option if latency bites before we are ready for a queue:
+FastAPI BackgroundTasks. Return the gate result immediately, run analysis
+in-process after the response. No broker. Does not survive a restart, so
+it is not the production answer.
+
+
+=======================================================================
+PHASE 0 -- FOUNDATIONS                                        [COMPLETE]
+=======================================================================
+
+Nothing user-visible. Everything downstream depends on it.
+
+[x] meal_uploads DDL
+    Reconstructed from meals.py into app/migrations/0001_baseline.sql.
+
+[x] image_metadata DDL
+    Reconstructed from _metadata_row_values() and the INSERT at
+    meals.py:193-202. Column types follow the _as_float/_as_int
+    coercions exactly.
+
+[x] Migration mechanism
+    app/migrations/*.sql + app/migrate.py. Forward-only, one transaction
+    per file, tracked in schema_migrations.
+      python migrate.py --status
+      python migrate.py
+
+[x] meal_food_analysis table
+    Migration 0002. The doc's Option 2. Chosen over expanding
+    image_qualities: that table is UNIQUE on meal_id, so re-running a
+    stage would destroy the previous payload.
+
+[x] pytest scaffolding
+    app/pytest.ini, app/requirements-dev.txt, app/tests/.
+    35 tests on evaluate_quality(), all passing.
+
+[x] Fix the schema's stale self-description
+    The "reserved columns" claim is gone (the old image_qualities.sql was
+    folded into the baseline with a corrected comment).
+    quality_decision.py now states plainly that food_confidence is
+    computed and persisted nowhere.
+
+[x] Doc reference cleanup
+    Dead links to NextVersion.md / ImageAnalysis.md / RemoveK8S.md
+    removed from Guide.md and AnalysisPipeline.md.
+
+CONSOLIDATION NOTE: app/schema/ was deleted. Its three files are folded
+into 0001_baseline.sql. Keeping both would have meant two hand-maintained
+sources of DDL with nothing keeping them in sync.
+
+RESOLVED -- the schema was re-baselined rather than reconciled. The dev
+database only ever held disposable dev data, so rather than diff the
+reconstruction against live Neon, 0001_baseline.sql was rewritten from
+scratch (meal_uploads/image_metadata/meal_contexts/image_qualities/
+meal_food_analysis replaced by meals/meal_images/meal_image_exif/
+analysis_runs/analysis_artifacts/meal_gate_verdicts/meal_foods), the dev
+database was dropped and recreated (app/scripts/reset_dev_db.{sql,py}),
+and the stale R2 objects under the old meal_ids were purged. No IF NOT
+EXISTS ambiguity remains: this is the actual schema, not a reconstruction
+of one. Full rationale in docs/Guide.md -> Database schema and in the
+header comments of 0001_baseline.sql.
+
+RESOLVED -- the fail-open gate. evaluate_quality() now returns two gates
+with opposite failure preferences:
+
+  accepted        fails OPEN.  "No reason to reject." Unchanged behaviour:
+                  an outage must not reject every upload with a message
+                  claiming the user's photo is unclear.
+
+  nutrition_ready fails CLOSED. Requires is_food_image is True -- positive
+                  evidence, not the absence of a rejection. Blocked reasons:
+                  not_food / vision_unavailable / photo_rejected.
+
+  analysis_complete  informational: did BOTH analyzers run? A meal can be
+                  nutrition_ready with analysis_complete false (OpenCV died,
+                  vision confirmed food) -- discount confidence, do not refuse.
+
+The case this exists for: OpenCV measures blur/brightness/resolution and has
+no concept of food, so during a vision outage a sharp photo of a dog passes
+the storage gate. Pinned by
+test_dog_photo_during_vision_outage_is_accepted_but_blocked.
+
+PHASE 2 CONTRACT: anything emitting a calorie or macro number branches on
+nutrition_ready, never on accepted.
+
+RESOLVED at the API layer -- nutrition_ready is now a response field, not a
+new status value (a 4th status was considered and rejected: it would be one
+more thing every consumer has to branch on, where nutrition_ready is already
+the correct branch). Both GET /api/meals and GET /api/meals/{id} return it
+directly, sourced from v_meal_list / v_meal_detail rather than a JSONB path.
+STILL OPEN on the frontend: no page reads it yet -- there is nothing to show
+until Phase 1 produces foods. Belongs in Phase 1 same as before.
+
+
+=======================================================================
+PHASE 1 -- VISUAL UNDERSTANDING
+=======================================================================
+
+First stage that produces something a user can see.
+
+[ ] VISIBLE_FOODS_SCHEMA in app/graph/schema.py
+    Shape per AnalysisPipeline.md:129-151. Model on DETECTED_ISSUES_SCHEMA.
+
+[ ] build_quality_context()
+    Pure function: detected_issues -> distilled constraints.
+    Mapping table at AnalysisPipeline.md:249-261.
+    Unit-test this. It is dict-in/dict-out, and it is where the currently
+    dead portion_difficulty / depth_unclear / food_overlap_level signals
+    finally get consumed. They are collected and stored today, read by
+    nobody.
+
+[ ] visual_understanding_node in app/graph/nodes.py
+    Same error contract as image_quality_node: catch everything, return
+    {"analysis_error": ...}, never raise. A degraded stage must not abort
+    the upload transaction.
+
+[ ] Extend graph state
+    Rename ImageQualityState -> MealAnalysisState. Add quality_context,
+    accepted, visible_foods.
+
+[ ] Conditional routing in app/graph/builder.py
+    Replace the straight-line edges at builder.py:36-37 with
+    add_conditional_edges on route_after_quality.
+    Rejected photos MUST skip the second model call -- that is the entire
+    point of the gate.
+
+[ ] Persist quality_context / visible_foods as analysis_artifacts and
+    project visible foods into meal_foods.
+
+[ ] Expose via GET /api/meals/{id}; render detected foods in Log.tsx.
+
+DELIVERABLE: upload a meal, see "jollof rice, grilled chicken, plantain"
+with per-item confidence. First time the app does what its tagline says.
+
+
+=======================================================================
+PHASE 2 -- NUTRITION
+=======================================================================
+
+The actual product. Still no segmentation.
+
+[ ] USDA FoodData Central client
+    USDA_API_KEY is already in app/.env.example:8 and
+    .env.docker.example:8, unused.
+
+[ ] Label -> USDA match, with caching
+    Food names are highly repetitive across users.
+
+[ ] Coarse portion estimation
+    From visual understanding's own hints. No geometry.
+
+[ ] Macro RANGES, not point estimates
+    Widen across all possible_types when ambiguity remains
+    (AnalysisPipeline.md:557-562).
+
+[ ] Frontend nutrition display
+    Show ranges and confidence honestly.
+
+DELIVERABLE: calorie and macro estimates. The milestone worth shipping to
+real users.
+
+
+=======================================================================
+PHASE 3 -- SPATIAL GROUNDING
+=======================================================================
+
+GATE: do not start until Phase 2 data shows portion accuracy is the
+bottleneck AND that geometry would fix it. Otherwise this is three layers
+of plumbing for an unmeasured problem.
+
+Deviation from AnalysisPipeline.md: the doc recommends parallel
+visual + segmentation -> fusion as the FIRST implementation. Deferred.
+Its own V1 for segmentation is VLM bboxes with mask_available:false
+(AnalysisPipeline.md:464) -- the weakest variant of the thing -- feeding
+a fusion node, feeding a portion-sizing stage that does not exist. Build
+the semantic layer, ship calorie ranges, then add segmentation to tighten
+them.
+
+[ ] SEGMENTATION_SCHEMA
+[ ] segmentation_node -- VLM bboxes, mask_available:false (doc's V1)
+[ ] fusion_node -- deterministic Python, label matching + confidence
+    combination. Another pure function, another good test target.
+[ ] Parallel fork + fan-in wiring
+[ ] Portion sizing from plate_coverage_percent, replacing the Phase 2
+    heuristic
+
+
+=======================================================================
+PHASE 4 -- HARDENING
+=======================================================================
+
+By now at least one async trigger has fired.
+
+[ ] Async -- queue + worker, 'processing' as a durable state, client
+    polling or SSE
+[ ] Model tiering -- Haiku/Sonnet for the gate, Opus only on accepted
+    meals (AnalysisPipeline.md:472-476). Meaningful cost win once volume
+    exists.
+[ ] Geocoding -- EXIF GPS -> meal_contexts.city/country. Extracted today,
+    discarded.
+[ ] K8S removal -- docs/RemoveK8S.md was deleted rather than written; the
+    k8s/ directory and cluster.yml are still present.
+[ ] Idempotent re-analysis -- the model_version/prompt_version columns
+    from Phase 0 pay off here: re-run fusion against stored artifacts
+    without re-calling the API.
+[ ] Upload sources beyond "web_upload".
+
+
+-----------------------------------------------------------------------
+CRITICAL PATH
+-----------------------------------------------------------------------
+
+Phase 0 -> 1 -> 2 is the path to product value.
+
+Phases 3 and 4 are accuracy and scale. Both should be triggered by
+measurement, not scheduled.

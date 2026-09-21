@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 import { Camera } from "lucide-react";
-import { addMealLogItem } from "../lib/mealLog";
-import type { ScanApiResponse } from "../lib/mealLog";
+import { uploadMealImage, type MealUploadMetadata } from "../lib/mealLog";
 
 export function Scan() {
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [scanResult, setScanResult] = useState<ScanApiResponse | null>(null);
+  const [uploadResult, setUploadResult] = useState<MealUploadMetadata | null>(null);
+  const [mealId, setMealId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleClickUpload = () => {
@@ -15,45 +15,23 @@ export function Scan() {
   };
 
   const uploadFile = async (file: File, imageDataUrl: string) => {
-    const formData = new FormData();
-    formData.append("image", file);
-    const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
-
     try {
       setLoading(true);
       setErrorMsg(null);
+      setUploadResult(null);
+      setMealId(null);
 
-      const res = await fetch(`${apiBaseUrl}/api/upload`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        throw new Error(`Upload failed (${res.status})`);
-      }
-
-      const data: ScanApiResponse = await res.json();
-      setScanResult(data);
-
-      const energy = data.macros.Energy?.value ?? 0;
-      const protein = data.macros.Protein?.value ?? 0;
-      const carbs = data.macros.Carbohydrate?.value ?? 0;
-      const fats = data.macros["Total Fat"]?.value ?? 0;
-
-      addMealLogItem({
-        id: crypto.randomUUID(),
-        name: data.food,
-        date: new Date().toLocaleDateString(),
-        protein: `${Math.round(protein)}g`,
-        carbs: `${Math.round(carbs)}g`,
-        fats: `${Math.round(fats)}g`,
-        calories: Math.round(energy),
-        image: imageDataUrl,
-      });
-      console.log("Server:", data);
+      const data = await uploadMealImage(file);
+      setUploadResult(data.metadata);
+      setMealId(data.meal_id);
+      // The server now returns auth-protected proxy paths rather than public
+      // URLs, so reuse the locally-read image for the preview.
+      setPreviewUrl(imageDataUrl);
     } catch (err) {
       console.error(err);
-      setErrorMsg("Could not analyze this image. Please try another one.");
+      setErrorMsg(
+        err instanceof Error ? err.message : "Could not analyze this image. Please try another one.",
+      );
     } finally {
       setLoading(false);
     }
@@ -73,7 +51,6 @@ export function Scan() {
 
     const imageDataUrl = await fileToDataUrl(selectedFile);
     setPreviewUrl(imageDataUrl);
-
     uploadFile(selectedFile, imageDataUrl);
   };
 
@@ -85,7 +62,7 @@ export function Scan() {
         <header className="page-card-header">
           <h1 className="page-card-title">Snap your meal</h1>
           <p className="page-card-subtitle">
-            Our AI will identify ingredients and calculate nutrition instantly.
+            Upload a photo to save it to your meal log. Nutrition analysis is coming next.
           </p>
         </header>
 
@@ -102,7 +79,7 @@ export function Scan() {
               <div className="upload-title">
                 Click to upload or take a photo
               </div>
-              <div className="upload-helper">Supports JPG, PNG</div>
+              <div className="upload-helper">Supports JPG, PNG, WEBP, HEIC</div>
             </>
           )}
           {hasImage && previewUrl && (
@@ -112,7 +89,7 @@ export function Scan() {
             >
               <div className="upload-area-overlay">
                 <span className="upload-area-overlay-text">
-                  {loading ? "Loading…" : "Uploaded"}
+                  {loading ? "Uploading…" : "Uploaded"}
                 </span>
               </div>
             </div>
@@ -128,33 +105,43 @@ export function Scan() {
 
         {errorMsg && <p className="scan-error">{errorMsg}</p>}
 
-        {scanResult && (
+        {uploadResult && (
           <section className="scan-result-card">
             <div className="scan-result-header">
               <div>
-                <h2 className="scan-result-title">Nutrition result</h2>
-                <p className="scan-result-food">{scanResult.food}</p>
+                <h2 className="scan-result-title">Upload saved</h2>
+                <p className="scan-result-food">
+                  {uploadResult.filename ?? "Meal image"} · Meal #{mealId}
+                </p>
               </div>
-              <span className="scan-result-serving">
-                Serving: {Math.round(scanResult.serving)} g
-              </span>
+              <span className="scan-result-serving">Metadata extracted</span>
             </div>
             <div className="scan-result-grid">
               <div className="scan-result-metric">
-                <span>Calories</span>
-                <strong>{Math.round(scanResult.macros.Energy?.value ?? 0)} kcal</strong>
+                <span>Format</span>
+                <strong>{uploadResult.image_format ?? "—"}</strong>
               </div>
               <div className="scan-result-metric">
-                <span>Protein</span>
-                <strong>{Math.round(scanResult.macros.Protein?.value ?? 0)} g</strong>
+                <span>Size</span>
+                <strong>
+                  {uploadResult.width && uploadResult.height
+                    ? `${uploadResult.width}×${uploadResult.height}`
+                    : "—"}
+                </strong>
               </div>
               <div className="scan-result-metric">
-                <span>Carbs</span>
-                <strong>{Math.round(scanResult.macros.Carbohydrate?.value ?? 0)} g</strong>
+                <span>File size</span>
+                <strong>
+                  {uploadResult.file_size_bytes
+                    ? `${Math.round(uploadResult.file_size_bytes / 1024)} KB`
+                    : "—"}
+                </strong>
               </div>
               <div className="scan-result-metric">
-                <span>Fat</span>
-                <strong>{Math.round(scanResult.macros["Total Fat"]?.value ?? 0)} g</strong>
+                <span>Camera</span>
+                <strong>
+                  {[uploadResult.make, uploadResult.model].filter(Boolean).join(" ") || "—"}
+                </strong>
               </div>
             </div>
           </section>
@@ -162,13 +149,13 @@ export function Scan() {
 
         <div className="scan-benefits">
           <div className="scan-benefit-card">
-            Industry standard level accuracy in ingredient detection
+            Saved to your account — visible in Meal Log
           </div>
           <div className="scan-benefit-card">
-            Instant macro breakdown for every scan
+            EXIF metadata stored for future analysis
           </div>
           <div className="scan-benefit-card">
-            Personalized dietary tips tailored to your goals
+            Nutrition breakdown coming in a future update
           </div>
         </div>
       </section>

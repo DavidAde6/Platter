@@ -1,51 +1,63 @@
-import { Search, Filter } from 'lucide-react'
-import quinoaBowl from '../assets/images/73866.jpg'
-import salmonAsparagus from '../assets/images/68708.jpg'
-import cheeseburger from '../assets/images/125745.jpg'
-import { useEffect, useState } from 'react'
-import { getMealLog } from '../lib/mealLog'
-import type { MealLogItem } from '../lib/mealLog'
+import { Search, Filter, ImageIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { fetchMealImageObjectUrl, fetchMealLog } from "../lib/mealLog";
+import type { MealLogItem } from "../lib/mealLog";
 
-const fallbackMeals: MealLogItem[] = [
-  {
-    id: '1',
-    name: 'Quinoa Power Bowl',
-    date: '3/14/2026',
-    protein: '22g',
-    carbs: '65g',
-    fats: '18g',
-    calories: 520,
-    image: quinoaBowl,
-  },
-  {
-    id: '2',
-    name: 'Salmon Asparagus',
-    date: '3/13/2026',
-    protein: '38g',
-    carbs: '26g',
-    fats: '26g',
-    calories: 420,
-    image: salmonAsparagus,
-  },
-  {
-    id: '3',
-    name: 'Classic Cheeseburger',
-    date: '3/12/2026',
-    protein: '32g',
-    carbs: '55g',
-    fats: '48g',
-    calories: 850,
-    image: cheeseburger,
-  },
-]
-
-export function Log() {
-  const [meals, setMeals] = useState<MealLogItem[]>([])
+function MealImage({ meal }: { meal: MealLogItem }) {
+  const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedMeals = getMealLog()
-    setMeals(savedMeals.length > 0 ? savedMeals : fallbackMeals)
-  }, [])
+    if (!meal.image) {
+      setSrc(null);
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+
+    fetchMealImageObjectUrl(meal.image)
+      .then((url) => {
+        if (active) {
+          objectUrl = url;
+          setSrc(url);
+        } else {
+          URL.revokeObjectURL(url);
+        }
+      })
+      .catch(() => {
+        // Leave the placeholder if the image can't be loaded.
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [meal.image]);
+
+  if (src) {
+    return <img src={src} alt={meal.name} className="log-card-image" />;
+  }
+
+  return (
+    <div className="log-card-image log-card-image-placeholder" aria-hidden="true">
+      <ImageIcon className="log-card-image-icon" />
+    </div>
+  );
+}
+
+export function Log() {
+  const [meals, setMeals] = useState<MealLogItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchMealLog()
+      .then(setMeals)
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Could not load meals");
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <div className="page">
@@ -61,29 +73,45 @@ export function Log() {
         </div>
       </header>
 
+      {loading && <p className="auth-loading">Loading meals…</p>}
+      {error && <p className="scan-error">{error}</p>}
+
+      {!loading && !error && meals.length === 0 && (
+        <p className="auth-loading">No meals yet. Scan your first meal to get started.</p>
+      )}
+
       <div className="log-list">
         {meals.map((meal) => (
           <article key={meal.id} className="log-card">
             <div className="log-card-left">
-              <img src={meal.image} alt={meal.name} className="log-card-image" />
+              <MealImage meal={meal} />
               <div className="log-card-text">
                 <div className="log-card-name">{meal.name}</div>
                 <div className="log-card-date">{meal.date}</div>
-                <div className="log-card-macros">
-                  <span>P: {meal.protein}</span>
-                  <span>C: {meal.carbs}</span>
-                  <span>F: {meal.fats}</span>
-                </div>
+                {meal.calories !== null ? (
+                  <div className="log-card-macros">
+                    <span>P: {meal.protein}</span>
+                    <span>C: {meal.carbs}</span>
+                    <span>F: {meal.fats}</span>
+                  </div>
+                ) : (
+                  <div className="log-card-macros">Status: {meal.status}</div>
+                )}
               </div>
             </div>
             <div className="log-card-calories">
-              <span className="log-card-calories-value">{meal.calories}</span>
-              <span className="log-card-calories-label">kcal</span>
+              {meal.calories !== null ? (
+                <>
+                  <span className="log-card-calories-value">{meal.calories}</span>
+                  <span className="log-card-calories-label">kcal</span>
+                </>
+              ) : (
+                <span className="log-card-calories-label">Pending analysis</span>
+              )}
             </div>
           </article>
         ))}
       </div>
     </div>
-  )
+  );
 }
-

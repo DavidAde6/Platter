@@ -1,17 +1,13 @@
 # Current Docker deployment
 
-The current GitHub Actions workflow deploys to the OVHcloud VPS at
-`/opt/platter`. It invokes the repository-root `docker-compose.yml` with
-`--env-file /opt/platter/.env`.
-
-The root Compose file also injects the backend's runtime environment from
-`/opt/platter/app/.env`. Keep both files outside source control, mode `0600`,
-and owned by the deployment user. Put application credentials in `app/.env`,
-including the pooled `DATABASE_URL` and direct
-`DATABASE_URL_UNPOOLED` for migrations. Note that the current `migrate.py`
-reads `DATABASE_URL` only, so the migration command must explicitly override
-that variable with the direct URL; adding `DATABASE_URL_UNPOOLED` alone does
-not change its connection.
+The GitHub Actions workflow deploys to the OVHcloud VPS at `/opt/platter` and
+invokes `deploy/docker-compose.prod.yml` with `--env-file /opt/platter/.env`.
+Keep that host-only environment file outside source control, mode `0600`, and
+owned by the deployment user. It holds the application credentials, including
+the pooled `DATABASE_URL` and direct `DATABASE_URL_UNPOOLED`. Note that the
+current `migrate.py` reads `DATABASE_URL` only, so the migration command must
+explicitly override that variable with the direct URL; adding
+`DATABASE_URL_UNPOOLED` alone does not change its connection.
 
 Build the frontend image in CI with an empty `VITE_API_URL` build argument. An
 empty value makes the browser use relative `/api/...` URLs, so Nginx can proxy
@@ -33,13 +29,12 @@ On the OVHcloud VPS, render and start the stack with the current deployment
 contract:
 
 ```sh
-docker compose --env-file /opt/platter/.env -f /opt/platter/docker-compose.yml config --quiet
-docker compose --env-file /opt/platter/.env -f /opt/platter/docker-compose.yml up -d
+docker compose --env-file /opt/platter/.env -f /opt/platter/deploy/docker-compose.prod.yml config --quiet
+docker compose --env-file /opt/platter/.env -f /opt/platter/deploy/docker-compose.prod.yml up -d
 ```
 
-The current root Compose file publishes the backend and frontend ports. The
-Cloudflare Tunnel is configured separately on the OVHcloud VPS and remains the
-public-edge configuration to maintain and validate during deployment.
+The production Compose file runs the backend, frontend, and Cloudflare Tunnel
+together; the Tunnel's public hostname should point to `http://frontend:80`.
 
 ## CI/CD
 

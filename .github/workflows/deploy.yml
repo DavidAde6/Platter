@@ -68,6 +68,22 @@ jobs:
         run: |
           image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
 
+          # The VPS keeps its runtime environment locally, so copy only the
+          # versioned Compose/Nginx configuration needed to run the new images.
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$DEPLOY_PATH/deploy'"
+
+          scp \
+            -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            deploy/docker-compose.prod.yml deploy/nginx.conf \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deploy/"
+
           ssh \
             -i ~/.ssh/id_ed25519 \
             -o BatchMode=yes \

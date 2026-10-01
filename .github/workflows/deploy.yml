@@ -10,6 +10,14 @@ permissions:
 
 env:
   DEPLOY_PATH: /opt/platter
+  # Override with a repository variable if the production hostname changes.
+  PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN || 'https://useplatter.ca' }}
+
+# Never let an older build finish after a newer push and replace it in
+# production. The newest push is the only deployment that should remain live.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
@@ -41,6 +49,7 @@ jobs:
 
           docker build \
             --build-arg VITE_API_URL= \
+            --build-arg VITE_BUILD_SHA="$IMAGE_TAG" \
             -t "$image_prefix-frontend:$IMAGE_TAG" \
             ./frontend
 
@@ -164,6 +173,22 @@ jobs:
           docker exec "$backend_id" python -c \
             'from graph.builder import PIPELINE_VERSION; assert PIPELINE_VERSION == "m1-visible-foods", PIPELINE_VERSION'
 
+          frontend_id=$(docker compose \
+            --project-name platter \
+            --env-file /opt/platter/.env \
+            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
+            ps -q frontend)
+          test -n "$frontend_id"
+
+          actual_frontend_image=$(docker inspect "$frontend_id" --format '{{.Config.Image}}')
+          test "$actual_frontend_image" = "$FRONTEND_IMAGE"
+
+          actual_frontend_config=$(docker inspect "$frontend_id" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
+          test "$actual_frontend_config" = "$DEPLOY_PATH/deploy/docker-compose.prod.yml"
+
+          docker exec "$frontend_id" wget -q -O - http://127.0.0.1/build.json \
+            | grep -F "\"commit\": \"$IMAGE_TAG\""
+
           if [ -f "$legacy_compose" ]; then
             rm -f "$legacy_compose"
             echo "Removed retired legacy Compose file."
@@ -179,3 +204,11 @@ jobs:
             ps
 
           REMOTE
+
+      - name: Verify public release
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-all-errors \
+            "$PUBLIC_ORIGIN/build.json" \
+            | grep -F "\"commit\": \"$IMAGE_TAG\""

@@ -17,6 +17,11 @@ them at the single public origin.
 docker build --build-arg VITE_API_URL= -t ghcr.io/ORG/platter-frontend:SHA frontend
 ```
 
+Each CI image also includes `/build.json`, containing the commit SHA. The
+deployment checks this marker both inside the frontend container and at the
+public origin. Set the repository variable `PUBLIC_ORIGIN` if production moves
+away from `https://useplatter.ca`.
+
 Set `BACKEND_IMAGE` and `FRONTEND_IMAGE` to the matching immutable commit-SHA
 tags and pin `CLOUDFLARED_VERSION` to a tested release. Before starting the
 stack, configure the Tunnel's public hostname in Cloudflare to point to:

@@ -13,10 +13,15 @@ COPY . .
 # Inject API URL at build time for Vite
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_BUILD_SHA
 
 
 # Build React for production
 RUN npm run build
+
+# A tiny immutable release marker lets deployment verify that the public
+# hostname is serving this exact frontend image, not a stale tunnel/container.
+RUN printf '{\n  "commit": "%s"\n}\n' "$VITE_BUILD_SHA" > /app/dist/build.json
 
 # Stage 2 — Serve with Nginx -- ( PRODUCTION READY )
 FROM nginx:alpine

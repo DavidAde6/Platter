@@ -18,3 +18,7 @@ frontend/dist
 # misc
 app/temp.txt
 .neon
+
+# Deployment SSH keypair — keep outside the repository.
+/platter
+/platter.pub

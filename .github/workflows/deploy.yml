@@ -99,6 +99,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             config -q
@@ -107,6 +108,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             pull
@@ -115,6 +117,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             run --rm backend python migrate.py
@@ -123,6 +126,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             up -d --wait --remove-orphans
@@ -131,6 +135,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps

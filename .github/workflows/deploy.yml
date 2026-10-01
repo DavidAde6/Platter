@@ -122,6 +122,20 @@ jobs:
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             run --rm backend python migrate.py
 
+          # The original VM stack was started from /opt/platter/docker-compose.yml.
+          # It uses local builds and can keep serving an older backend under the
+          # same Compose project name. Retire it explicitly before the immutable
+          # image stack is brought up. Do not remove the file until the new stack
+          # has passed the provenance checks below.
+          legacy_compose="$DEPLOY_PATH/docker-compose.yml"
+          if [ -f "$legacy_compose" ]; then
+            echo "Retiring legacy Compose stack..."
+            docker compose \
+              --project-name platter \
+              -f "$legacy_compose" \
+              down --remove-orphans
+          fi
+
           echo "Starting updated application..."
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
@@ -130,6 +144,30 @@ jobs:
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             up -d --wait --remove-orphans
+
+          # A green container health check alone is not enough: prove that the
+          # backend was created from this Compose file, the requested immutable
+          # image, and the M1 analysis code before retiring the legacy file.
+          backend_id=$(docker compose \
+            --project-name platter \
+            --env-file /opt/platter/.env \
+            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
+            ps -q backend)
+          test -n "$backend_id"
+
+          actual_image=$(docker inspect "$backend_id" --format '{{.Config.Image}}')
+          test "$actual_image" = "$BACKEND_IMAGE"
+
+          actual_config=$(docker inspect "$backend_id" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
+          test "$actual_config" = "$DEPLOY_PATH/deploy/docker-compose.prod.yml"
+
+          docker exec "$backend_id" python -c \
+            'from graph.builder import PIPELINE_VERSION; assert PIPELINE_VERSION == "m1-visible-foods", PIPELINE_VERSION'
+
+          if [ -f "$legacy_compose" ]; then
+            rm -f "$legacy_compose"
+            echo "Removed retired legacy Compose file."
+          fi
 
           echo "Deployment status:"
           BACKEND_IMAGE="$BACKEND_IMAGE" \

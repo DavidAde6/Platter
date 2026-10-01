@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
-class ImageQualityState(TypedDict, total=False):
+class MealAnalysisState(TypedDict, total=False):
     """Shared state threaded through the image-analysis graph.
 
     Inputs are set before invocation; each node reads what it needs and writes
@@ -20,3 +20,10 @@ class ImageQualityState(TypedDict, total=False):
     # The image-quality node's analysis, shaped for the image_qualities
     # detected_issues JSONB column.
     detected_issues: dict[str, Any]
+    technical_quality: dict[str, Any]
+    quality_context: dict[str, Any]
+    visible_foods: dict[str, Any]
+
+
+# Compatibility alias while downstream callers migrate to the M1 name.
+ImageQualityState = MealAnalysisState

@@ -39,6 +39,8 @@ export interface MealLogItem {
   calories: number | null;
   image: string | null;
   status: string;
+  foodLabels: string[];
+  foodAnalysisStatus: "available" | "unavailable" | "not_applicable";
 }
 
 export interface MealApiItem {
@@ -51,6 +53,19 @@ export interface MealApiItem {
   // Branch nutrition/calorie display on this, never on `status`: a meal can
   // be stored and accepted while still not being eligible for an estimate.
   nutrition_ready: boolean;
+  food_analysis_status: "available" | "unavailable" | "not_applicable";
+  food_labels: string[];
+}
+
+export interface MealFood {
+  label: string;
+  possible_types: string[];
+  possible_preparations: string[];
+  confidence: number;
+}
+
+export interface MealDetail extends MealApiItem {
+  foods: MealFood[];
 }
 // source, processed_at, rejection_reason, image_type dropped: typed here
 // before but never read by any component. Re-add the one you need if a
@@ -88,7 +103,15 @@ export function mealApiItemToLogItem(meal: MealApiItem): MealLogItem {
     calories: null,
     image: meal.thumbnail_url ?? meal.image_url,
     status: meal.status,
+    foodLabels: meal.food_labels,
+    foodAnalysisStatus: meal.food_analysis_status,
   };
+}
+
+export async function fetchMealDetail(mealId: number): Promise<MealDetail> {
+  const res = await fetch(`${getApiBaseUrl()}/api/meals/${mealId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
 }
 
 export async function uploadMealImage(file: File): Promise<MealUploadResponse> {

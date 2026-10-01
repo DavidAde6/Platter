@@ -62,7 +62,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:?Set CLOUDFLARED_VERSION to a tested immutable version}
-    command: tunnel --no-autoupdate run --token $${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     environment:
       CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in the host-only environment file}
     depends_on:

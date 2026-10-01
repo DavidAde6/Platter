@@ -40,9 +40,9 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from graph import run_image_quality_graph
+from graph import run_meal_analysis_graph
 from graph.builder import PIPELINE_VERSION
-from graph.nodes import MODEL, PROMPT_VERSION
+from graph.nodes import MODEL, PROMPT_VERSION, VISIBLE_FOODS_PROMPT_VERSION
 from image_quality import analyze_image_quality, analyzer_config_hash
 from quality_decision import DECISION_RULES_VERSION, QualityDecision, evaluate_quality
 from repositories import analysis as analysis_repo
@@ -82,6 +82,8 @@ class MealPublic(BaseModel):
     # ineligible for a nutrition estimate.
     nutrition_ready: bool = False
     likely_meal_type: str | None = None
+    food_analysis_status: str = "not_applicable"
+    food_labels: list[str] = []
 
 
 class MealDetail(MealPublic):
@@ -200,6 +202,8 @@ class _StageResult:
 
     @property
     def status(self) -> str:
+        if self.stage == "visible_foods" and self.payload.get("reason") == "photo_rejected":
+            return "skipped"
         return "error" if self.error else "ok"
 
 
@@ -233,7 +237,8 @@ def run_meal_analysis(content: bytes) -> _AnalysisResult:
     the upload down with it.
     """
     technical, technical_ms = _timed(lambda: analyze_image_quality(content))
-    vision, vision_ms = _timed(lambda: run_image_quality_graph(content))
+    graph_result, graph_ms = _timed(lambda: run_meal_analysis_graph(content, technical))
+    vision = graph_result["vision_quality"]
 
     stages = [
         _StageResult(
@@ -245,7 +250,7 @@ def run_meal_analysis(content: bytes) -> _AnalysisResult:
         _StageResult(
             stage="vision_quality",
             payload=vision,
-            latency_ms=vision_ms,
+            latency_ms=graph_ms,
             model_id=MODEL,
             prompt_version=PROMPT_VERSION,
         ),
@@ -255,6 +260,16 @@ def run_meal_analysis(content: bytes) -> _AnalysisResult:
     # shape it always took. The two payloads are now separate artifacts in the
     # database, but the gating function -- and its 18 tests -- are untouched.
     decision = evaluate_quality({"technical": technical, "vision": vision})
+    if decision.accepted:
+        stages.append(_StageResult(
+            stage="quality_context", payload=graph_result["quality_context"], latency_ms=0,
+        ))
+    stages.append(_StageResult(
+        stage="visible_foods", payload=graph_result["visible_foods"], latency_ms=graph_ms,
+        model_id=MODEL if decision.accepted else None,
+        prompt_version=VISIBLE_FOODS_PROMPT_VERSION if decision.accepted else None,
+        config_hash="visible-foods-rubric/2026-09-30.1" if decision.accepted else None,
+    ))
     return _AnalysisResult(decision=decision, stages=stages)
 
 
@@ -299,6 +314,8 @@ def _to_public(row: MealListRow) -> MealPublic:
         image_format=row.image_format,
         nutrition_ready=row.nutrition_ready,
         likely_meal_type=row.likely_meal_type,
+        food_analysis_status=row.food_analysis_status,
+        food_labels=row.food_labels,
     )
 
 
@@ -401,6 +418,11 @@ def create_meal_with_metadata(
                 prompt_version=stage.prompt_version,
                 config_hash=stage.config_hash,
                 latency_ms=stage.latency_ms,
+            )
+        visible = next(stage.payload for stage in analysis.stages if stage.stage == "visible_foods")
+        if visible.get("result") == "identified":
+            analysis_repo.replace_foods(
+                cur, run_id=run_id, meal_id=meal_id, foods=visible["visible_foods"]
             )
         analysis_repo.insert_verdict(
             cur,

@@ -45,6 +45,8 @@ class MealListRow(BaseModel):
     nutrition_blocked_reason: str | None = None
     rejection_reason: str | None = None
     processed_at: datetime | None = None
+    food_analysis_status: str = "not_applicable"
+    food_labels: list[str] = []
 
 
 class MealDetailRow(MealListRow):

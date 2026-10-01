@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Camera } from "lucide-react";
-import { uploadMealImage, type MealUploadMetadata } from "../lib/mealLog";
+import { fetchMealDetail, uploadMealImage, type MealDetail, type MealUploadMetadata } from "../lib/mealLog";
 
 export function Scan() {
   const [loading, setLoading] = useState(false);
@@ -9,6 +9,7 @@ export function Scan() {
   const [uploadResult, setUploadResult] = useState<MealUploadMetadata | null>(null);
   const [mealId, setMealId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [mealDetail, setMealDetail] = useState<MealDetail | null>(null);
 
   const handleClickUpload = () => {
     fileInputRef.current?.click();
@@ -20,10 +21,12 @@ export function Scan() {
       setErrorMsg(null);
       setUploadResult(null);
       setMealId(null);
+      setMealDetail(null);
 
       const data = await uploadMealImage(file);
       setUploadResult(data.metadata);
       setMealId(data.meal_id);
+      setMealDetail(await fetchMealDetail(data.meal_id));
       // The server now returns auth-protected proxy paths rather than public
       // URLs, so reuse the locally-read image for the preview.
       setPreviewUrl(imageDataUrl);
@@ -62,7 +65,7 @@ export function Scan() {
         <header className="page-card-header">
           <h1 className="page-card-title">Snap your meal</h1>
           <p className="page-card-subtitle">
-            Upload a photo to save it to your meal log. Nutrition analysis is coming next.
+            Upload a photo to identify the foods visible on your plate.
           </p>
         </header>
 
@@ -147,6 +150,20 @@ export function Scan() {
           </section>
         )}
 
+        {mealDetail?.food_analysis_status === "available" && (
+          <section className="scan-result-card">
+            <h2 className="scan-result-title">Foods Platter can see</h2>
+            {mealDetail.foods.map((food) => {
+              const band = food.confidence >= 0.8 ? "high" : food.confidence >= 0.5 ? "medium" : "low";
+              const alternatives = food.possible_types.length ? ` — possibly ${food.possible_types.join(" or ")}` : "";
+              return <p key={food.label} className="scan-result-food"><strong>{food.label}</strong>{alternatives} · Platter&apos;s confidence: {band}</p>;
+            })}
+          </section>
+        )}
+        {mealDetail?.food_analysis_status === "unavailable" && (
+          <section className="scan-result-card"><p className="scan-result-food">Analysis completed, but food labels are unavailable for this photo.</p></section>
+        )}
+
         <div className="scan-benefits">
           <div className="scan-benefit-card">
             Saved to your account — visible in Meal Log
@@ -155,7 +172,7 @@ export function Scan() {
             EXIF metadata stored for future analysis
           </div>
           <div className="scan-benefit-card">
-            Nutrition breakdown coming in a future update
+            Food labels include uncertainty when the photo is ambiguous
           </div>
         </div>
       </section>

@@ -88,26 +88,11 @@ export function Log() {
               <div className="log-card-text">
                 <div className="log-card-name">{meal.name}</div>
                 <div className="log-card-date">{meal.date}</div>
-                {meal.calories !== null ? (
-                  <div className="log-card-macros">
-                    <span>P: {meal.protein}</span>
-                    <span>C: {meal.carbs}</span>
-                    <span>F: {meal.fats}</span>
-                  </div>
-                ) : (
-                  <div className="log-card-macros">Status: {meal.status}</div>
-                )}
+                <div className="log-card-macros">
+                  {meal.foodAnalysisStatus === "available" ? meal.foodLabels.join(", ") :
+                    meal.foodAnalysisStatus === "unavailable" ? "Food labels unavailable" : `Status: ${meal.status}`}
+                </div>
               </div>
-            </div>
-            <div className="log-card-calories">
-              {meal.calories !== null ? (
-                <>
-                  <span className="log-card-calories-value">{meal.calories}</span>
-                  <span className="log-card-calories-label">kcal</span>
-                </>
-              ) : (
-                <span className="log-card-calories-label">Pending analysis</span>
-              )}
             </div>
           </article>
         ))}

@@ -8,7 +8,6 @@ requests==2.32.3
 pillow==12.3.0
 pillow-heif==1.7.0
 python-multipart==0.0.20
-regex==2025.11.3
 python-dotenv==1.2.1
 langgraph==1.2.6
 anthropic==0.111.0

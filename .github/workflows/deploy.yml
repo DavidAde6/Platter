@@ -10,6 +10,7 @@ permissions:
 
 env:
   DEPLOY_PATH: /opt/platter
+  PUBLIC_APP_URL: https://useplatter.ca
 
 # Never let an older build finish after a newer push and replace it in
 # production. The newest push is the only deployment that should remain live.
@@ -47,6 +48,7 @@ jobs:
 
           docker build \
             --build-arg VITE_API_URL= \
+            --build-arg BUILD_SHA="$IMAGE_TAG" \
             -t "$image_prefix-frontend:$IMAGE_TAG" \
             ./frontend
 
@@ -100,6 +102,7 @@ jobs:
           set -euo pipefail
 
           cd "$DEPLOY_PATH"
+          echo "Deploying to host: $(hostname)"
 
           echo "Checking Docker Compose configuration..."
           BACKEND_IMAGE="$BACKEND_IMAGE" \
@@ -164,6 +167,21 @@ jobs:
           actual_image=$(docker inspect "$backend_id" --format '{{.Config.Image}}')
           test "$actual_image" = "$BACKEND_IMAGE"
 
+          frontend_id=$(docker compose \
+            --project-name platter \
+            --env-file /opt/platter/.env \
+            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
+            ps -q frontend)
+          test -n "$frontend_id"
+
+          actual_image=$(docker inspect "$frontend_id" --format '{{.Config.Image}}')
+          test "$actual_image" = "$FRONTEND_IMAGE"
+
+          build_sha=${FRONTEND_IMAGE##*:}
+          expected_build="{\"git_sha\":\"$build_sha\"}"
+          actual_build=$(docker exec "$frontend_id" cat /usr/share/nginx/html/build.json)
+          test "$actual_build" = "$expected_build"
+
           actual_config=$(docker inspect "$backend_id" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
           test "$actual_config" = "$DEPLOY_PATH/deploy/docker-compose.prod.yml"
 
@@ -185,3 +203,22 @@ jobs:
             ps
 
           REMOTE
+
+          # A healthy container on the wrong VPS is not a production deploy.
+          # Wait briefly for the tunnel, then prove that the public hostname
+          # serves the frontend built by this workflow run.
+          expected_build="{\"git_sha\":\"$IMAGE_TAG\"}"
+          for attempt in $(seq 1 20); do
+            public_build=$(curl --fail --silent --show-error \
+              --max-time 15 \
+              -H 'Cache-Control: no-cache' \
+              "$PUBLIC_APP_URL/build.json" 2>/dev/null || true)
+            if [ "$public_build" = "$expected_build" ]; then
+              echo "Public deployment verified: $public_build"
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "Public deployment verification failed. Expected $expected_build from $PUBLIC_APP_URL/build.json; got: ${public_build:-<no response>}" >&2
+          exit 1

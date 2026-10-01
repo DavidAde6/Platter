@@ -14,6 +14,12 @@ COPY . .
 ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 
+# A tiny immutable deployment marker.  CI checks this through the public
+# domain after each release, so a successful deploy cannot silently target a
+# different VPS than the one serving useplatter.ca.
+ARG BUILD_SHA
+RUN test -n "$BUILD_SHA" && printf '{"git_sha":"%s"}\n' "$BUILD_SHA" > public/build.json
+
 
 # Build React for production
 RUN npm run build

@@ -19,6 +19,7 @@ _LIST_COLUMNS = """
     nutrition_ready, nutrition_blocked_reason, rejection_reason,
     image_format, width, height, has_original, has_thumbnail,
     likely_meal_type, meal_time_source, processed_at
+    , food_analysis_status, food_labels
 """
 
 

@@ -30,10 +30,10 @@ from db import connect_direct
 BASE_DIR = Path(__file__).parent
 MIGRATIONS_DIR = BASE_DIR / "migrations"
 
-# db.py reads DATABASE_URL straight from the environment; main.py is what
-# normally loads .env into it. This is a separate entry point, so it has to do
-# the same or every invocation outside an active shell export fails.
-load_dotenv(BASE_DIR / ".env")
+# db.py reads DATABASE_URL straight from the environment; main.py normally
+# loads the repository-root .env into it. This separate entry point must use
+# the same file so local migrations target the same database as the API.
+load_dotenv(BASE_DIR.parent / ".env")
 
 _CREATE_TRACKING_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (

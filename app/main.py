@@ -36,7 +36,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # cd frontend
 # npm run dev
 
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR.parent / ".env")
 
 app = FastAPI()
 app.add_middleware(

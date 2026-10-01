@@ -1,9 +1,17 @@
-# Production Docker deployment
+# Current Docker deployment
 
-Keep the real environment file outside the repository, for example
-`/etc/platter/production.env`, mode `0600`, owned by the deployment user. Copy
-[`.env.example`](../.env.example) there as `production.env` and replace every
-placeholder.
+The current GitHub Actions workflow deploys to the OVHcloud VPS at
+`/opt/platter`. It invokes the repository-root `docker-compose.yml` with
+`--env-file /opt/platter/.env`.
+
+The root Compose file also injects the backend's runtime environment from
+`/opt/platter/app/.env`. Keep both files outside source control, mode `0600`,
+and owned by the deployment user. Put application credentials in `app/.env`,
+including the pooled `DATABASE_URL` and direct
+`DATABASE_URL_UNPOOLED` for migrations. Note that the current `migrate.py`
+reads `DATABASE_URL` only, so the migration command must explicitly override
+that variable with the direct URL; adding `DATABASE_URL_UNPOOLED` alone does
+not change its connection.
 
 Build the frontend image in CI with an empty `VITE_API_URL` build argument. An
 empty value makes the browser use relative `/api/...` URLs, so Nginx can proxy
@@ -21,15 +29,17 @@ stack, configure the Tunnel's public hostname in Cloudflare to point to:
 http://frontend:80
 ```
 
-On the VM, render and start the stack with the host-only file:
+On the OVHcloud VPS, render and start the stack with the current deployment
+contract:
 
 ```sh
-docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml config --quiet
-docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml up -d
+docker compose --env-file /opt/platter/.env -f /opt/platter/docker-compose.yml config --quiet
+docker compose --env-file /opt/platter/.env -f /opt/platter/docker-compose.yml up -d
 ```
 
-This Compose stack publishes no host ports. `cloudflared` is the sole ingress;
-the backend is reachable only by Nginx on the Docker network.
+The current root Compose file publishes the backend and frontend ports. The
+Cloudflare Tunnel is configured separately on the OVHcloud VPS and remains the
+public-edge configuration to maintain and validate during deployment.
 
 ## CI/CD
 
@@ -46,6 +56,6 @@ keeps registry credentials host-local rather than sending them through the
 deployment job.
 
 Set the workflow's `DEPLOY_PATH` environment variable to the directory on the
-VM containing this repository's `deploy/` directory (default: `/opt/platter`).
+OVHcloud VPS containing this repository (default: `/opt/platter`).
 The deployment supplies the new image tags only for that Compose invocation;
 the host-only production environment file remains unchanged.

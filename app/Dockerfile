@@ -1,23 +1,8 @@
 # Use official Python image
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Set working directory inside container
 WORKDIR /app
-
-# OS dependencies for Numpy, OpenCV, and FastAPI
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    libjpeg-dev \
-    zlib1g-dev \
-    libpng-dev \
-    libtiff-dev \
-    libfreetype6-dev \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 

@@ -31,10 +31,21 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker build -t "$image_prefix-backend:$IMAGE_TAG" ./app
-          docker push "$image_prefix-backend:$IMAGE_TAG"
-          docker build --build-arg VITE_API_URL= -t "$image_prefix-frontend:$IMAGE_TAG" ./frontend
-          docker push "$image_prefix-frontend:$IMAGE_TAG"
+
+          docker build \
+            -t "$image_prefix-backend:$IMAGE_TAG" \
+            ./app
+
+          docker push \
+            "$image_prefix-backend:$IMAGE_TAG"
+
+          docker build \
+            --build-arg VITE_API_URL= \
+            -t "$image_prefix-frontend:$IMAGE_TAG" \
+            ./frontend
+
+          docker push \
+            "$image_prefix-frontend:$IMAGE_TAG"
 
       - name: Configure SSH
         env:
@@ -42,24 +53,70 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
+
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Deploy Compose stack on VM
+      - name: Deploy Compose stack on VPS
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' BACKEND_IMAGE='$image_prefix-backend:$IMAGE_TAG' FRONTEND_IMAGE='$image_prefix-frontend:$IMAGE_TAG' bash -s" <<'REMOTE'
+
           set -euo pipefail
+
           cd "$DEPLOY_PATH"
-          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml pull
-          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml run --rm backend python migrate.py
-          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml up -d --wait --remove-orphans
-          BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" docker compose --env-file /etc/platter/production.env -f deploy/docker-compose.prod.yml ps
+
+          echo "Checking Docker Compose configuration..."
+          BACKEND_IMAGE="$BACKEND_IMAGE" \
+          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+          docker compose \
+            --env-file /opt/platter/.env \
+            -f /opt/platter/docker-compose.yml \
+            config -q
+
+          echo "Pulling backend and frontend images..."
+          BACKEND_IMAGE="$BACKEND_IMAGE" \
+          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+          docker compose \
+            --env-file /opt/platter/.env \
+            -f /opt/platter/docker-compose.yml \
+            pull
+
+          echo "Running database migrations..."
+          BACKEND_IMAGE="$BACKEND_IMAGE" \
+          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+          docker compose \
+            --env-file /opt/platter/.env \
+            -f /opt/platter/docker-compose.yml \
+            run --rm backend python migrate.py
+
+          echo "Starting updated application..."
+          BACKEND_IMAGE="$BACKEND_IMAGE" \
+          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+          docker compose \
+            --env-file /opt/platter/.env \
+            -f /opt/platter/docker-compose.yml \
+            up -d --wait --remove-orphans
+
+          echo "Deployment status:"
+          BACKEND_IMAGE="$BACKEND_IMAGE" \
+          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+          docker compose \
+            --env-file /opt/platter/.env \
+            -f /opt/platter/docker-compose.yml \
+            ps
+
           REMOTE

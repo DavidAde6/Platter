@@ -130,3 +130,41 @@ portion size, with short free-text reasons.
 
 Be reasonable, not overly strict: a normal, slightly imperfect phone photo of \
 a meal should still be usable."""
+
+# M1's authoritative, lossless visible-food contract. Keep this separate from
+# the quality prompt: a change to one must not accidentally alter the other
+# stage's provenance. Anthropic structured outputs rejects JSON Schema bounds
+# such as maxItems/minimum; normalize_visible_foods() enforces those limits
+# after parsing instead.
+VISIBLE_FOODS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "result": {"type": "string", "enum": ["identified", "unavailable"]},
+        "visible_foods": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "possible_types": {"type": "array", "items": {"type": "string"}},
+                    "possible_preparations": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["label", "possible_types", "possible_preparations", "confidence"],
+                "additionalProperties": False,
+            },
+        },
+        "uncertainties": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["result", "visible_foods", "uncertainties"],
+    "additionalProperties": False,
+}
+
+VISIBLE_FOODS_PROMPT = """You identify only foods visibly supported by a single meal photo.
+Return coarse, lowercase, singular food-category labels (for example rice, chicken,
+plantain), merging repeated portions of the same category. Do not infer hidden
+ingredients, portions, nutrition, regions, masks, or bounding boxes. Put dish or
+subtype hypotheses in possible_types and cooking methods in possible_preparations.
+Use alternatives only for genuine ambiguity. If foods cannot be responsibly
+identified, return result unavailable, no visible_foods, and concise uncertainty.
+Quality context is a limitation, never evidence that a food exists."""

@@ -24,16 +24,12 @@ export function PublicAccessGate() {
 
         <div className="access-gate__notice">
           <LockKeyhole aria-hidden="true" />
-          <p>
-            This preview is not open for general use yet. Joining the
-            allowlist does not create an account or grant immediate access.
-          </p>
+          <p>Join the waitlist to receive approval to test the app.</p>
         </div>
 
-        <a className="access-gate__action" href="mailto:hello@useplatter.ca?subject=Platter%20public%20allowlist">
-          Request allowlist access
+        <a className="access-gate__action" href="mailto:hello@useplatter.ca?subject=Platter%20waitlist">
+          Join the waitlist
         </a>
-        <p className="access-gate__footnote">We’ll be in touch when there’s something real to share.</p>
       </section>
     </main>
   )

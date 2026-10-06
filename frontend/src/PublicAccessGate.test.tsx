@@ -8,7 +8,8 @@ describe('PublicAccessGate', () => {
 
     expect(screen.getByRole('heading', { name: /we’re setting the table/i })).toBeInTheDocument()
     expect(screen.getByText(/public allowlist/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /request allowlist access/i })).toHaveAttribute(
+    expect(screen.getByText(/join the waitlist to receive approval to test the app/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /join the waitlist/i })).toHaveAttribute(
       'href',
       expect.stringContaining('hello@useplatter.ca'),
     )

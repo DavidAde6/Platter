@@ -104,11 +104,22 @@ jobs:
           cd "$DEPLOY_PATH"
           echo "Deploying to host: $(hostname)"
 
+          # The retired root Compose file used the default `platter` project
+          # name and could continue serving locally built images. Retire every
+          # container from that project before starting the immutable production
+          # stack under its own project name.
+          legacy_container_ids=$(docker ps -aq --filter 'label=com.docker.compose.project=platter')
+          if [ -n "$legacy_container_ids" ]; then
+            echo "Removing legacy Compose containers..."
+            docker rm -f $legacy_container_ids
+          fi
+          rm -f "$DEPLOY_PATH/docker-compose.yml"
+
           echo "Checking Docker Compose configuration..."
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             config -q
@@ -117,7 +128,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             pull
@@ -126,39 +137,25 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             run --rm backend python migrate.py
-
-          # The original VM stack was started from /opt/platter/docker-compose.yml.
-          # It uses local builds and can keep serving an older backend under the
-          # same Compose project name. Retire it explicitly before the immutable
-          # image stack is brought up. Do not remove the file until the new stack
-          # has passed the provenance checks below.
-          legacy_compose="$DEPLOY_PATH/docker-compose.yml"
-          if [ -f "$legacy_compose" ]; then
-            echo "Retiring legacy Compose stack..."
-            docker compose \
-              --project-name platter \
-              -f "$legacy_compose" \
-              down --remove-orphans
-          fi
 
           echo "Starting updated application..."
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             up -d --force-recreate --wait --remove-orphans
 
           # A green container health check alone is not enough: prove that the
           # backend was created from this Compose file, the requested immutable
-          # image, and the M1 analysis code before retiring the legacy file.
+          # image, and the M1 analysis code.
           backend_id=$(docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps -q backend)
@@ -168,7 +165,7 @@ jobs:
           test "$actual_image" = "$BACKEND_IMAGE"
 
           frontend_id=$(docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps -q frontend)
@@ -188,16 +185,11 @@ jobs:
           docker exec "$backend_id" python -c \
             'from graph.builder import PIPELINE_VERSION; assert PIPELINE_VERSION == "m1-visible-foods", PIPELINE_VERSION'
 
-          if [ -f "$legacy_compose" ]; then
-            rm -f "$legacy_compose"
-            echo "Removed retired legacy Compose file."
-          fi
-
           echo "Deployment status:"
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter \
+            --project-name platter-prod \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps

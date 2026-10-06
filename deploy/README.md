@@ -29,8 +29,8 @@ On the OVHcloud VPS, render and start the stack with the current deployment
 contract:
 
 ```sh
-docker compose --env-file /opt/platter/.env -f /opt/platter/deploy/docker-compose.prod.yml config --quiet
-docker compose --env-file /opt/platter/.env -f /opt/platter/deploy/docker-compose.prod.yml up -d
+docker compose --project-name platter-prod --env-file /opt/platter/.env -f /opt/platter/deploy/docker-compose.prod.yml config --quiet
+docker compose --project-name platter-prod --env-file /opt/platter/.env -f /opt/platter/deploy/docker-compose.prod.yml up -d
 ```
 
 The production Compose file runs the backend, frontend, and Cloudflare Tunnel
@@ -53,4 +53,7 @@ deployment job.
 Set the workflow's `DEPLOY_PATH` environment variable to the directory on the
 OVHcloud VPS containing this repository (default: `/opt/platter`).
 The deployment supplies the new image tags only for that Compose invocation;
-the host-only production environment file remains unchanged.
+the host-only production environment file remains unchanged. The retired root
+`docker-compose.yml` is intentionally not a production option: CI removes any
+old `platter` project containers before deploying the distinct `platter-prod`
+project.

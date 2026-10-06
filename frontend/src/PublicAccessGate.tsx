@@ -4,14 +4,15 @@ export function PublicAccessGate() {
   return (
     <main className="access-gate">
       <section className="access-gate__card" aria-labelledby="access-gate-title">
-        <div className="access-gate__brand" aria-label="Platter">
-          <span className="access-gate__mark" aria-hidden="true"><span /></span>
-          <span>Platter</span>
-        </div>
-
-        <div className="access-gate__eyebrow">
-          <Sparkles aria-hidden="true" />
-          <span>Private preview</span>
+        <div className="access-gate__header">
+          <div className="access-gate__brand" aria-label="Platter">
+            <span className="access-gate__mark" aria-hidden="true"><span /></span>
+            <span>Platter</span>
+          </div>
+          <div className="access-gate__eyebrow">
+            <Sparkles aria-hidden="true" />
+            <span>Private preview</span>
+          </div>
         </div>
 
         <h1 id="access-gate-title">We’re setting the table.</h1>

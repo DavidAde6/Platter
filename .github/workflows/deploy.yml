@@ -104,22 +104,14 @@ jobs:
           cd "$DEPLOY_PATH"
           echo "Deploying to host: $(hostname)"
 
-          # The retired root Compose file used the default `platter` project
-          # name and could continue serving locally built images. Retire every
-          # container from that project before starting the immutable production
-          # stack under its own project name.
-          legacy_container_ids=$(docker ps -aq --filter 'label=com.docker.compose.project=platter')
-          if [ -n "$legacy_container_ids" ]; then
-            echo "Removing legacy Compose containers..."
-            docker rm -f $legacy_container_ids
-          fi
+          # The retired root Compose file must never be recreated on the VPS.
           rm -f "$DEPLOY_PATH/docker-compose.yml"
 
           echo "Checking Docker Compose configuration..."
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             config -q
@@ -128,7 +120,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             pull
@@ -137,7 +129,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             run --rm backend python migrate.py
@@ -146,7 +138,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             up -d --force-recreate --wait --remove-orphans
@@ -155,7 +147,7 @@ jobs:
           # backend was created from this Compose file, the requested immutable
           # image, and the M1 analysis code.
           backend_id=$(docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps -q backend)
@@ -165,7 +157,7 @@ jobs:
           test "$actual_image" = "$BACKEND_IMAGE"
 
           frontend_id=$(docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps -q frontend)
@@ -189,7 +181,7 @@ jobs:
           BACKEND_IMAGE="$BACKEND_IMAGE" \
           FRONTEND_IMAGE="$FRONTEND_IMAGE" \
           docker compose \
-            --project-name platter-prod \
+            --project-name platter \
             --env-file /opt/platter/.env \
             -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
             ps

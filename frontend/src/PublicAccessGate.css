@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
+
+.access-gate {
+  --cream: #faf7f1;
+  --ink: #1f1b17;
+  --paprika: #c8563c;
+  --olive: #526747;
+  --oat: #e7d6bf;
+  --paper: #fffdf9;
+  --muted: #70685f;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 12%, rgba(233, 174, 54, 0.17), transparent 22rem),
+    radial-gradient(circle at 92% 80%, rgba(200, 86, 60, 0.13), transparent 28rem),
+    var(--cream);
+  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+.access-gate__card {
+  width: min(100%, 620px);
+  padding: clamp(34px, 7vw, 64px);
+  border: 1px solid rgba(31, 27, 23, 0.12);
+  border-radius: 32px;
+  background: rgba(255, 253, 249, 0.83);
+  box-shadow: 0 24px 60px rgba(73, 51, 31, 0.12);
+}
+
+.access-gate__brand { display: inline-flex; align-items: center; gap: 10px; font-family: 'Fraunces', Georgia, serif; font-size: 28px; font-weight: 700; letter-spacing: -0.04em; }
+.access-gate__mark { width: 29px; height: 22px; border: 2px solid var(--ink); border-radius: 50% 50% 48% 48%; display: grid; place-items: center; position: relative; transform: rotate(-7deg); }
+.access-gate__mark::after { content: ''; position: absolute; width: 17px; height: 5px; border-bottom: 2px solid var(--ink); border-radius: 50%; bottom: 4px; }
+.access-gate__mark span { width: 5px; height: 5px; border-radius: 50%; background: var(--paprika); }
+
+.access-gate__eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-top: 58px; color: var(--olive); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.access-gate__eyebrow svg { width: 16px; color: var(--paprika); }
+.access-gate h1 { max-width: 10ch; margin: 15px 0 17px; font-family: 'Fraunces', Georgia, serif; font-size: clamp(43px, 7vw, 64px); font-weight: 600; line-height: 0.96; letter-spacing: -0.06em; }
+.access-gate__lede { max-width: 48ch; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.65; }
+.access-gate__notice { display: flex; gap: 12px; margin: 31px 0; padding: 16px; border: 1px solid rgba(82, 103, 71, 0.2); border-radius: 16px; background: #edf1e8; color: var(--olive); }
+.access-gate__notice svg { width: 18px; min-width: 18px; margin-top: 2px; }
+.access-gate__notice p { margin: 0; font-size: 13px; font-weight: 500; line-height: 1.55; }
+.access-gate__action { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 12px 20px; border-radius: 999px; background: var(--paprika); box-shadow: 0 10px 18px rgba(200, 86, 60, 0.18); color: #fffaf5; font-size: 14px; font-weight: 700; text-decoration: none; transition: transform 180ms ease, box-shadow 180ms ease; }
+.access-gate__action:hover { transform: translateY(-2px); box-shadow: 0 14px 24px rgba(200, 86, 60, 0.25); }
+.access-gate__action:focus-visible { outline: 3px solid var(--olive); outline-offset: 4px; }
+.access-gate__footnote { margin: 18px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+@media (max-width: 520px) {
+  .access-gate { padding: 16px; }
+  .access-gate__card { border-radius: 24px; }
+  .access-gate__eyebrow { margin-top: 43px; }
+}

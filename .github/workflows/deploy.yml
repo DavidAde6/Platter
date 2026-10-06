@@ -89,7 +89,7 @@ jobs:
             -i ~/.ssh/id_ed25519 \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
-            deploy/docker-compose.prod.yml deploy/nginx.conf \
+            deploy/docker-compose.prod.yml deploy/nginx.conf deploy/remote-deploy.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deploy/"
 
           ssh \
@@ -97,96 +97,7 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' BACKEND_IMAGE='$image_prefix-backend:$IMAGE_TAG' FRONTEND_IMAGE='$image_prefix-frontend:$IMAGE_TAG' bash -s" <<'REMOTE'
-
-          set -euo pipefail
-
-          cd "$DEPLOY_PATH"
-          echo "Deploying to host: $(hostname)"
-
-          # The retired root Compose file must never be recreated on the VPS.
-          rm -f "$DEPLOY_PATH/docker-compose.yml"
-
-          echo "Checking Docker Compose configuration..."
-          BACKEND_IMAGE="$BACKEND_IMAGE" \
-          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
-          docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            config -q
-
-          echo "Pulling backend and frontend images..."
-          BACKEND_IMAGE="$BACKEND_IMAGE" \
-          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
-          docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            pull
-
-          echo "Running database migrations..."
-          BACKEND_IMAGE="$BACKEND_IMAGE" \
-          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
-          docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            run --rm backend python migrate.py
-
-          echo "Starting updated application..."
-          BACKEND_IMAGE="$BACKEND_IMAGE" \
-          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
-          docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            up -d --force-recreate --wait --remove-orphans
-
-          # A green container health check alone is not enough: prove that the
-          # backend was created from this Compose file, the requested immutable
-          # image, and the M1 analysis code.
-          backend_id=$(docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            ps -q backend)
-          test -n "$backend_id"
-
-          actual_image=$(docker inspect "$backend_id" --format '{{.Config.Image}}')
-          test "$actual_image" = "$BACKEND_IMAGE"
-
-          frontend_id=$(docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            ps -q frontend)
-          test -n "$frontend_id"
-
-          actual_image=$(docker inspect "$frontend_id" --format '{{.Config.Image}}')
-          test "$actual_image" = "$FRONTEND_IMAGE"
-
-          build_sha=${FRONTEND_IMAGE##*:}
-          expected_build="{\"git_sha\":\"$build_sha\"}"
-          actual_build=$(docker exec "$frontend_id" cat /usr/share/nginx/html/build.json)
-          test "$actual_build" = "$expected_build"
-
-          actual_config=$(docker inspect "$backend_id" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
-          test "$actual_config" = "$DEPLOY_PATH/deploy/docker-compose.prod.yml"
-
-          docker exec "$backend_id" python -c \
-            'from graph.builder import PIPELINE_VERSION; assert PIPELINE_VERSION == "m1-visible-foods", PIPELINE_VERSION'
-
-          echo "Deployment status:"
-          BACKEND_IMAGE="$BACKEND_IMAGE" \
-          FRONTEND_IMAGE="$FRONTEND_IMAGE" \
-          docker compose \
-            --project-name platter \
-            --env-file /opt/platter/.env \
-            -f "$DEPLOY_PATH/deploy/docker-compose.prod.yml" \
-            ps
-
-          REMOTE
+            "DEPLOY_PATH='$DEPLOY_PATH' BACKEND_IMAGE='$image_prefix-backend:$IMAGE_TAG' FRONTEND_IMAGE='$image_prefix-frontend:$IMAGE_TAG' bash '$DEPLOY_PATH/deploy/remote-deploy.sh'"
 
           # A healthy container on the wrong VPS is not a production deploy.
           # Wait briefly for the tunnel, then prove that the public hostname
